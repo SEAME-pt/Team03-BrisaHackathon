@@ -28,31 +28,32 @@ These are **mandatory** for modern Android (especially Android 13+), otherwise t
 We created a `ForegroundService` class and a `BackgroundService` that extends `Service` and displays a notification when started.
 
 ```java
-public class ForegroundService extends Service {
+public class BackgroundService extends Service {
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("🚗 Toll Detected!")
-            .setContentText("You passed through a toll road.")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setDefaults(Notification.DEFAULT_ALL)
-            .build();
+        NotificationChannel channel = new NotificationChannel(
+                "background_channel",
+                "background Channel",
+                NotificationManager.IMPORTANCE_MAX
+        );
 
-        startForeground(1, notification);
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        manager.createNotificationChannel(channel);
 
-        // Optional: stop after 5 seconds (for testing)
-        new Thread(() -> {
-            try {
-                Thread.sleep(5000);
-                stopSelf();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }).start();
+        // Here we basically build a notif and publish it on app start. It doesnt appear as a pop up but in the notification center.
+        Notification notification = new NotificationCompat.Builder(this, "background_channel")
+                .setContentTitle("BackgroundService")
+                .setContentText("BackgroundService is running")
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(Notification.CATEGORY_MESSAGE)
+                .build();
 
-        return START_NOT_STICKY;
+        //notify that is it alive
+//        manager.notify(1001, notification);
+
+        return START_NOT_STICKY; // doesnt restart when kill
     }
 }
 ```
@@ -132,4 +133,9 @@ Despite doing everything “correctly,” heads-up notifications **did not appea
 # How to try 
 
 Run the project with the drop down menu of the main screen open (in the emulator). you will see two notifications. The one from the foreground service will disapear after 5s once the service is killed.
+
+# References
+- Grant location permission: [https://developer.android.com/develop/sensors-and-location/location/permissions#foreground](https://developer.android.com/develop/sensors-and-location/location/permissions#foreground)
+- Send notifcations: [https://developer.android.com/training/cars/platforms/automotive-os/notifications](https://developer.android.com/training/cars/platforms/automotive-os/notifications)
+- Design a service: [https://developer.android.com/develop/background-work/services#java](https://developer.android.com/develop/background-work/services#java)
 
