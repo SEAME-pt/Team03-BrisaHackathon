@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
+import androidx.core.app.Person;
 
 import androidx.core.app.NotificationCompat;
 
@@ -24,14 +25,17 @@ public class ForegroundService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d("ForegroundService", "Foreground service starting");
+        Person user = new Person.Builder().setName("Brisa").build();
+
+        NotificationCompat.MessagingStyle messagingStyle = new NotificationCompat.MessagingStyle(user)
+                .addMessage("You passed through a toll road.", System.currentTimeMillis(), user);
 
         Notification alertNotification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("🚗 Toll Detected!")
-                .setContentText("You passed through a toll road.")
+                .setStyle(messagingStyle)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-                .setDefaults(Notification.DEFAULT_ALL) // Enable sound/vibration
+                .setDefaults(Notification.DEFAULT_ALL)
                 .build();
 
         // Important: startForeground with ID and Notification

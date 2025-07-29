@@ -16,7 +16,7 @@ public class BackgroundService extends Service {
         NotificationChannel channel = new NotificationChannel(
                 "background_channel",
                 "background Channel",
-                NotificationManager.IMPORTANCE_HIGH
+                NotificationManager.IMPORTANCE_MAX
         );
 
         NotificationManager manager = getSystemService(NotificationManager.class);
@@ -31,8 +31,8 @@ public class BackgroundService extends Service {
                 .setCategory(Notification.CATEGORY_MESSAGE)
                 .build();
 
-        //keep alive
-         manager.notify(1001, notification);
+        //notify that is it alive
+//        manager.notify(1001, notification);
 
         return START_NOT_STICKY; // doesnt restart when kill
     }
