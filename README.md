@@ -65,7 +65,6 @@ The services are declared in `AndroidManifest.xml`. depending on the type of ser
     android:name=".ForegroundService"
     android:foregroundServiceType="location" 
     android:exported="false" />
-
 <service
 android:name=".BackgroundService"
 android:foregroundServiceType="location"
@@ -135,7 +134,6 @@ Despite doing everything “correctly,” heads-up notifications **did not appea
 Run the project with the drop down menu of the main screen open (in the emulator). you will see two notifications. The one from the foreground service will disapear after 5s once the service is killed.
 
 # References
-- Grant location permission: [https://developer.android.com/develop/sensors-and-location/location/permissions#foreground](https://developer.android.com/develop/sensors-and-location/location/permissions#foreground)
-- Send notifcations: [https://developer.android.com/training/cars/platforms/automotive-os/notifications](https://developer.android.com/training/cars/platforms/automotive-os/notifications)
 - Design a service: [https://developer.android.com/develop/background-work/services#java](https://developer.android.com/develop/background-work/services#java)
-
+- Send notifcations: [https://developer.android.com/training/cars/platforms/automotive-os/notifications](https://developer.android.com/training/cars/platforms/automotive-os/notifications)
+- Grant location permission (usefull to then get gps data): [https://developer.android.com/develop/sensors-and-location/location/permissions#foreground](https://developer.android.com/develop/sensors-and-location/location/permissions#foreground)
