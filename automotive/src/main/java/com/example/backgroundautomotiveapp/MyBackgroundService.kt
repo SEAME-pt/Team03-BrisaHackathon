@@ -48,8 +48,8 @@ class MyBackgroundService : Service() {
             if (response.status == HttpStatusCode.OK) {
                 try {
                     val jsonResponse = JSONObject(responseBodyText)
-                    val authToken = jsonResponse.optString("authToken", null)
-                    if (authToken != null) {
+                    val authToken = jsonResponse.optString("authToken", "")
+                    if (authToken.isNotEmpty()) {
                         Log.i("Ktor_Login_Manual", "Login successful.")
                         authToken
                     } else {
@@ -96,7 +96,7 @@ class MyBackgroundService : Service() {
 
                 if (currentToken != null) {
                     Log.i(tag, "Successfully logged in. Token acquired and will be saved.")
-                    SecureStorage.saveAuthToken(applicationContext, currentToken) // <-- SAVE THE TOKEN
+                    SecureStorage.saveAuthToken(applicationContext, currentToken)
                 } else {
                     Log.e(tag, "Login attempt failed. Unable to acquire token.")
                     // Handle login failure: retry logic, stop service, etc.
@@ -107,36 +107,37 @@ class MyBackgroundService : Service() {
                 Log.i(tag, "Existing token found. Using stored token.")
             }
 
-            if (currentToken != null) {
-                fetchSomeDataWithToken(currentToken)
-            } else {
-                Log.e(tag, "No valid token available to perform tasks.")
-            }
+            fetchTolls(currentToken)
         }
         return START_STICKY
     }
 
-    private suspend fun fetchSomeDataWithToken(authToken: String): String? {
+    private suspend fun fetchTolls(authToken: String): String? {
         val apiUrl = "https://dev.a-to-be.com/mtolling/services/mtolling/tolls" // Replace with actual endpoint
         return try {
             val response: HttpResponse = httpClient.get(apiUrl) {
-                header(HttpHeaders.Authorization, "Bearer $authToken") // Common way to send Bearer tokens
-                // Or if your API expects it differently:
-                // header("X-Auth-Token", authToken)
+                header(HttpHeaders.Authorization, "Bearer $authToken")
             }
 
             Log.d(tag, "GET request to $apiUrl - Status: ${response.status}")
-            if (response.status == HttpStatusCode.OK) {
-                Log.e(tag, "Data fetched: ${response.bodyAsText()}")
-                response.bodyAsText()
-            } else if (response.status == HttpStatusCode.Unauthorized) {
-                Log.w(tag, "Token is invalid or expired (401 Unauthorized). Clearing token.")
-                SecureStorage.clearAuthToken(applicationContext) // Clear the bad token
-                // You might want to trigger a re-login attempt here or stop the service.
-                null
-            } else {
-                Log.e(tag, "Error fetching data: ${response.status} - ${response.bodyAsText()}")
-                null
+            when (response.status) {
+                HttpStatusCode.OK -> {
+                    val responseBodyText = response.bodyAsText(Charsets.UTF_8)
+                    val jsonResponse = JSONObject(responseBodyText)
+                    val tollList = jsonResponse.optString("tollsList", "")
+                    Log.i(tag, "Data fetched successfully. TollsList: $tollList") // Changed to Log.i
+                    responseBodyText // Return the full response body text
+                }
+                HttpStatusCode.Unauthorized -> {
+                    Log.w(tag, "Token is invalid or expired (401 Unauthorized). Clearing token.")
+                    SecureStorage.clearAuthToken(applicationContext)
+                    null
+                }
+                else -> {
+                    val errorBody = response.bodyAsText(Charsets.UTF_8) // Read body for error logging
+                    Log.e(tag, "Error fetching data: ${response.status} - $errorBody")
+                    null
+                }
             }
         } catch (e: Exception) {
             Log.e(tag, "Exception during GET request to $apiUrl: ${e.message}", e)
