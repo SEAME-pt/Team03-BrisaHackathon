@@ -12,7 +12,7 @@ import io.ktor.http.*
 import io.ktor.utils.io.charsets.*
 import kotlinx.coroutines.*
 import org.json.JSONObject
-import kotlin.coroutines.coroutineContext
+import com.example.backgroundautomotiveapp.util.SecureStorage
 
 class MyBackgroundService : Service() {
 
@@ -22,11 +22,10 @@ class MyBackgroundService : Service() {
 
     private val httpClient by lazy {
         HttpClient(CIO) {
-
         }
     }
 
-    suspend fun performLoginManually(email: String, password: String): String? { // Returns authToken string or null
+    private suspend fun performLoginManually(email: String, password: String): String? { // Returns authToken string or null
         val apiUrl = "https://dev.a-to-be.com/mtolling/services/mtolling/login"
 
         // Manually construct the JSON request body string
@@ -38,24 +37,20 @@ class MyBackgroundService : Service() {
         """.trimIndent() // trimIndent is useful for multi-line strings
 
         return try {
-            Log.d("Ktor_Login_Manual", "Attempting login to $apiUrl with body: $jsonRequestBody")
             val response: HttpResponse = httpClient.post(apiUrl) {
                 contentType(ContentType.Application.Json)
-                setBody(jsonRequestBody) // Send the raw JSON string
+                setBody(jsonRequestBody)
             }
 
-            Log.d("Ktor_Login_Manual", "Response Code: ${response.status}")
             val responseBodyText = response.bodyAsText(Charsets.UTF_8) // Specify charset if needed
-            Log.d("Ktor_Login_Manual", "Response Body: $responseBodyText")
+            Log.d("Ktor_Login_Manual", "Response Code: ${response.status}")
 
             if (response.status == HttpStatusCode.OK) {
-                // Manually parse the JSON response to get the authToken
                 try {
                     val jsonResponse = JSONObject(responseBodyText)
                     val authToken = jsonResponse.optString("authToken", null)
                     if (authToken != null) {
-                        Log.i("Ktor_Login_Manual", "Login successful. AuthToken: $authToken")
-                        // You could also parse licensePlates here if needed using jsonResponse.optJSONArray("licensePlates")
+                        Log.i("Ktor_Login_Manual", "Login successful.")
                         authToken
                     } else {
                         Log.e("Ktor_Login_Manual", "AuthToken not found in JSON response.")
@@ -84,29 +79,68 @@ class MyBackgroundService : Service() {
         Log.d(tag, "Service Started")
 
         serviceScope.launch {
-            val emailFromSomewhere = "seame3@teste.com"
-            val passwordFromSomewhere = "}jcUX]BBp*73"
+            var currentToken = SecureStorage.getAuthToken(applicationContext)
 
-            val authToken = performLoginManually(emailFromSomewhere, passwordFromSomewhere)
+            if (currentToken == null) {
+                Log.i(tag, "No existing token found. Attempting login...")
+                val apiEmail = BuildConfig.API_EMAIL
+                val apiPassword = BuildConfig.API_PASSWORD
 
-            if (authToken != null) {
-                Log.i(tag, "Successfully logged in (manual). Token: $authToken")
-                // Now you can store authToken securely and use it for future API calls
-                // Example: performBackgroundTask(authToken)
+                if (apiEmail.isEmpty() ||apiPassword.isEmpty()) {
+                    Log.e(tag, "API credentials are not properly configured in BuildConfig.")
+                    stopSelf()
+                    return@launch
+                }
+
+                currentToken = performLoginManually(apiEmail, apiPassword)
+
+                if (currentToken != null) {
+                    Log.i(tag, "Successfully logged in. Token acquired and will be saved.")
+                    SecureStorage.saveAuthToken(applicationContext, currentToken) // <-- SAVE THE TOKEN
+                } else {
+                    Log.e(tag, "Login attempt failed. Unable to acquire token.")
+                    // Handle login failure: retry logic, stop service, etc.
+                    stopSelf() // Example: stop if login fails
+                    return@launch
+                }
             } else {
-                Log.e(tag, "Login attempt failed (manual).")
+                Log.i(tag, "Existing token found. Using stored token.")
+            }
+
+            if (currentToken != null) {
+                fetchSomeDataWithToken(currentToken)
+            } else {
+                Log.e(tag, "No valid token available to perform tasks.")
             }
         }
         return START_STICKY
     }
 
-    private suspend fun performBackgroundTask(authToken: String) { // Takes authToken
-        var count = 0
-        while (coroutineContext.isActive) {
-            delay(5000)
-            count++
-            Log.d(tag, "Background task running... Count: $count. Using token: $authToken")
-            // Make authenticated API calls here
+    private suspend fun fetchSomeDataWithToken(authToken: String): String? {
+        val apiUrl = "https://dev.a-to-be.com/mtolling/services/mtolling/tolls" // Replace with actual endpoint
+        return try {
+            val response: HttpResponse = httpClient.get(apiUrl) {
+                header(HttpHeaders.Authorization, "Bearer $authToken") // Common way to send Bearer tokens
+                // Or if your API expects it differently:
+                // header("X-Auth-Token", authToken)
+            }
+
+            Log.d(tag, "GET request to $apiUrl - Status: ${response.status}")
+            if (response.status == HttpStatusCode.OK) {
+                Log.e(tag, "Data fetched: ${response.bodyAsText()}")
+                response.bodyAsText()
+            } else if (response.status == HttpStatusCode.Unauthorized) {
+                Log.w(tag, "Token is invalid or expired (401 Unauthorized). Clearing token.")
+                SecureStorage.clearAuthToken(applicationContext) // Clear the bad token
+                // You might want to trigger a re-login attempt here or stop the service.
+                null
+            } else {
+                Log.e(tag, "Error fetching data: ${response.status} - ${response.bodyAsText()}")
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Exception during GET request to $apiUrl: ${e.message}", e)
+            null
         }
     }
 
