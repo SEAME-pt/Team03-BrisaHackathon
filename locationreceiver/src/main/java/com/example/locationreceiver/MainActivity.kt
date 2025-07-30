@@ -16,7 +16,7 @@ class MainActivity : Activity() {
         Log.i(TAG_MAIN, "Attempting to start LocationReceiverService from MainActivity...")
         startOurService()
 
-        finish()
+        //finish()
     }
 
     private fun startOurService() {
