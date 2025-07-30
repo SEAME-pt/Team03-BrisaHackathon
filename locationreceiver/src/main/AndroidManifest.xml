@@ -2,6 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" /> <!-- Permission to receive boot completed event -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" /> <!-- Some devices use QUICKBOOT_POWERON, especially for faster restarts -->
+    <uses-permission android:name="android.permission.QUICKBOOT_POWERON" />
 
     <uses-feature
         android:name="android.hardware.type.automotive"
@@ -31,7 +37,8 @@
         <service
             android:name=".LocationReceiverService"
             android:enabled="true"
-            android:exported="false"/>
+            android:exported="false"
+            android:foregroundServiceType="location"/>
 
     </application>
 </manifest>

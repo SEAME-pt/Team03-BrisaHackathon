@@ -22,10 +22,15 @@ import android.os.Process
 import android.os.RemoteException
 import com.example.common_aidl_interfaces.ILocationProvider
 import com.example.common_aidl_interfaces.ILocationReceiverCallback
-import com.example.locationreceiver.util.Geofence
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.os.Build
+import androidx.core.app.NotificationCompat
 import com.example.locationreceiver.util.GeofencePoint
 import com.example.locationreceiver.util.Toll
 import kotlinx.serialization.json.Json
+import org.json.JSONArray
 
 data class LocationPoint(
     val latitude: Double,
@@ -38,12 +43,16 @@ data class LocationPoint(
 class LocationReceiverService : Service() {
 
     private val tag = "LocationReceiverService"
+    private val NOTIFICATION_CHANNEL_ID = "LocationReceiverChannel"
+    private val NOTIFICATION_ID = 101
+
     private var iLocationProvider: ILocationProvider? = null
     private var isBound = false
 
     private val collectedLocationPoints = mutableListOf<LocationPoint>()
-    private val locationListLock = Any()
     private val tollList = mutableListOf<Toll>()
+    private var closedTollBuffer: Toll? = null
+    private var openedTollLocationBuffer: LocationPoint? = null
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob) // Background thread
@@ -64,12 +73,56 @@ class LocationReceiverService : Service() {
             for (toll in tollList) {
                 for (geofence in toll.geofences) {
                     if (isPointInPolygon(latitude, longitude, geofence.geofencePoints )) {
-                        Log.d(tag, "point in ${toll.name}!")
-                        //Raise a flag if the toll is CLOSED
-                        //Break (cant be anywhgere else)
+                        Log.d(tag, "point in ${toll.name} of type ${toll.type}!")
+                        val currentPoint = LocationPoint(latitude, longitude, timestamp, accuracy.toDouble())
+                        handleTollEvent(toll, currentPoint)
                     }
                 }
 
+            }
+        }
+    }
+
+    fun handleTollEvent(eventToll: Toll, eventPoint: LocationPoint) {
+        serviceScope.launch {
+            Log.i(
+                tag,
+                "handleTollEvent: Toll='${eventToll.name}', Type='${eventToll.type}'"
+            )
+
+            val authToken = SecureStorage.getAuthToken(applicationContext)
+            val plate = BuildConfig.API_PLATE
+
+            if (authToken == null || plate.isEmpty()) {
+                Log.e(tag, "Cannot handle toll event: Auth token or plate is missing.")
+                return@launch
+            }
+
+            if (eventToll.type == "CLOSED") {
+                if (closedTollBuffer == null) {
+                    closedTollBuffer = eventToll
+                    collectedLocationPoints.add(eventPoint)
+                } else if (closedTollBuffer != eventToll) {
+                    closedTollBuffer = null
+                    collectedLocationPoints.add(eventPoint)
+                    postTrip(authToken, plate, collectedLocationPoints)
+                    collectedLocationPoints.clear()
+                }
+            } else {
+                if (openedTollLocationBuffer == null) {
+                    openedTollLocationBuffer = eventPoint
+                    collectedLocationPoints.add(eventPoint)
+                    postTrip(authToken, plate, collectedLocationPoints)
+                    collectedLocationPoints.clear()
+                } else {
+                    val currentBuffer = openedTollLocationBuffer
+                    if (currentBuffer != null && currentBuffer.timestamp - eventPoint.timestamp < 300000) {
+                        collectedLocationPoints.add(eventPoint)
+                        postTrip(authToken, plate, collectedLocationPoints)
+                        collectedLocationPoints.clear()
+                    }
+                    openedTollLocationBuffer = eventPoint
+                }
             }
         }
     }
@@ -202,77 +255,102 @@ class LocationReceiverService : Service() {
         }
     }
 
-    private suspend fun postTrip(authToken: String, plate: String): String? {
+    private suspend fun postTrip(
+        authToken: String,
+        plate: String,
+        pointsToPost: List<LocationPoint> // New third argument
+    ): String? { // Return type can be String (trip ID/status) or Boolean (success/fail)
         val apiUrl = "https://dev.a-to-be.com/mtolling/services/mtolling/trips"
 
-        val jsonRequestBody = """
-            {
-                "licensePlate": "$plate",
-                "locations": [
-                    {
-                      "latitude": "38.657100000000000",
-                      "longitude": "-8.894200000000000",
-                      "altitude": 0,
-                      "timestamp": 2,
-                      "inHighway": "YES"
-                    },
-                    {
-                      "latitude": "38.656748619072500",
-                      "longitude": "-8.893693884252881",
-                      "altitude": 0,
-                      "timestamp": 2,
-                      "inHighway": "YES"
-                    },
-                    {
-                      "latitude": "38.656450000000000",
-                      "longitude": "-8.893000000000000",
-                      "altitude": 0,
-                      "timestamp": 2,
-                      "inHighway": "YES"
-                    }
-                ],
-                "startTripMethod": "",
-                "stopTripMethod": ""
+        if (pointsToPost.isEmpty()) {
+            Log.w(tag, "postTrip called with no location points to send.")
+            // Depending on API: return null, or an error, or proceed if API allows empty locations
+            return null // Example: Don't proceed if no points
+        }
+
+        val locationsJsonArray = JSONArray()
+        Log.d(tag, "Preparing to post ${pointsToPost.size} location points provided as argument.")
+
+        pointsToPost.forEach { point ->
+            val locationJson = JSONObject()
+            try {
+                locationJson.put("latitude", String.format("%.17f", point.latitude))
+                locationJson.put("longitude", String.format("%.17f", point.longitude))
+                locationJson.put("altitude", point.altitude)
+                locationJson.put("timestamp", point.timestamp)
+                locationJson.put("inHighway", point.inHighway) // Assuming LocationPoint has this
+                // locationJson.put("accuracy", String.format("%.1f", point.accuracy)) // If needed
+                locationsJsonArray.put(locationJson)
+            } catch (e: org.json.JSONException) {
+                Log.e(tag, "JSONException while building a location JSON object for postTrip: ${e.message}", e)
+                // Skip this point or decide to fail the entire post
             }
-        """.trimIndent()
+        }
+
+        if (locationsJsonArray.length() == 0 && pointsToPost.isNotEmpty()) {
+            Log.e(tag, "Failed to serialize any provided location points into JSON for postTrip. Aborting.")
+            return null
+        }
+
+        val requestBodyJson = JSONObject()
+        try {
+            requestBodyJson.put("licensePlate", plate)
+            requestBodyJson.put("locations", locationsJsonArray)
+            requestBodyJson.put("startTripMethod", "AUTO") // Or your desired value
+            requestBodyJson.put("stopTripMethod", "AUTO")  // Or your desired value
+        } catch (e: org.json.JSONException) {
+            Log.e(tag, "JSONException while building the main request body for postTrip: ${e.message}", e)
+            return null
+        }
+
+        val jsonRequestBodyString = requestBodyJson.toString()
+        Log.d(tag, "Post Trip (with argument) Request Body: $jsonRequestBodyString")
 
         return try {
             val response: HttpResponse = httpClient.post(apiUrl) {
                 header(HttpHeaders.Authorization, "Bearer $authToken")
                 contentType(ContentType.Application.Json)
-                setBody(jsonRequestBody)
+                setBody(jsonRequestBodyString)
             }
 
-            val responseBodyText = response.bodyAsText(Charsets.UTF_8) // Specify charset if needed
-            Log.d("Post Trip", "Response Code: ${response.status}")
+            val responseBodyText = response.bodyAsText(Charsets.UTF_8)
+            Log.d(tag, "Post Trip (with argument) Response Code: ${response.status}")
 
-            if (response.status == HttpStatusCode.OK) {
+            if (response.status == HttpStatusCode.OK || response.status == HttpStatusCode.Created) {
                 try {
                     val jsonResponse = JSONObject(responseBodyText)
-                    val tripNumber = jsonResponse.optString("tripNumber", "")
-                    Log.e("Post Trip", "Trip: $jsonResponse")
-                    tripNumber
+                    val tripNumber = jsonResponse.optString("tripNumber", jsonResponse.optString("id", ""))
+                    Log.i(tag, "Trip posted successfully (with argument). Response: $jsonResponse")
+                    // Return trip number or a success indicator
+                    if (tripNumber.isEmpty()) "SUCCESS_NO_TRIP_ID" else tripNumber
                 } catch (e: org.json.JSONException) {
-                    Log.e("Post Trip", "Failed to parse JSON response: ${e.message}", e)
-                    null
+                    Log.e(tag, "Failed to parse JSON from successful postTrip response: ${e.message}. Body: $responseBodyText", e)
+                    "SUCCESS_RESPONSE_PARSE_ERROR"
                 }
             } else {
-                Log.e("Post Trip", "Trip post failed: ${response.status} - $responseBodyText")
+                Log.e(tag, "Trip post failed (with argument): ${response.status} - $responseBodyText")
                 null
             }
         } catch (e: Exception) {
-            Log.e("Post Trip", "Exception during trip post to $apiUrl: ${e.message}", e)
+            Log.e(tag, "Exception during HTTP POST in postTrip (with argument) to $apiUrl: ${e.message}", e)
             null
         }
     }
 
+
     override fun onCreate() {
         super.onCreate()
         Log.d(tag, "Client Service Created.")
+        createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(tag, "Client Service Started.")
+
+        val notification = createNotification()
+        startForeground(NOTIFICATION_ID, notification)
+        Log.i(tag, "Service started in foreground.")
+
         if (!isBound) {
             bindToRemoteService()
         }
@@ -305,8 +383,6 @@ class LocationReceiverService : Service() {
                 Log.i(tag, "Existing token found. Using stored token.")
             }
 
-            val plate = BuildConfig.API_PLATE
-
             val json = Json {
                 ignoreUnknownKeys = true // skips unknown fields
             }
@@ -316,10 +392,30 @@ class LocationReceiverService : Service() {
             for (toll in parsed.tolls) {
                 tollList.add(toll)
             }
-
-            postTrip(currentToken, plate)
         }
         return START_STICKY
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val serviceChannel = NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "Location Receiver Service Channel", // User-visible name
+                NotificationManager.IMPORTANCE_DEFAULT // Or IMPORTANCE_LOW if appropriate
+            )
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.createNotificationChannel(serviceChannel)
+            Log.d(tag, "Notification channel created.")
+        }
+    }
+
+    private fun createNotification(): Notification {
+        return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+            .setContentTitle("Toll Tracking Active")
+            .setContentText("Monitoring location for toll events.")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setOngoing(true)
+            .build()
     }
 
     private fun bindToRemoteService() {
@@ -366,6 +462,8 @@ class LocationReceiverService : Service() {
         Log.d(tag, "Client Service Destroyed.")
         serviceJob.cancel()
         httpClient.close()
-        unbindFromRemoteService() // Ensure unbinding on destroy
+        unbindFromRemoteService()
+        stopForeground(true)
+        Log.i(tag, "Service stopped from foreground.")
     }
 }

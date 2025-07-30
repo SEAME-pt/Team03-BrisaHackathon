@@ -127,8 +127,8 @@ class LocationProviderService : Service() {
             return
         }
 
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000L) // Update every 10 seconds
-            .setMinUpdateIntervalMillis(5000L) // Minimum update interval 5 seconds
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000L) // Update every 10 seconds
+            .setMinUpdateIntervalMillis(1000L) // Minimum update interval 5 seconds
             .build()
 
         try {

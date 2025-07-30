@@ -12,7 +12,7 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : Activity() {
 
-    private val TAG_MAIN = "MainActivity_DEBUG"
+    private val TAG_MAIN = "MainActivityProvider_DEBUG"
     private val LOCATION_PERMISSION_REQUEST_CODE = 1 // Unique request code
 
     override fun onCreate(savedInstanceState: Bundle?) {
