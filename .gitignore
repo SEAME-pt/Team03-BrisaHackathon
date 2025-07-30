@@ -1,0 +1,38 @@
+# Build artifacts
+encryption_demo
+encryption_demo_debug
+encryption_demo_test
+gps_accuracy_demo_private
+gps_accuracy_demo_private_debug
+*.o
+*.a
+*.so
+*.dylib
+core
+core.*
+
+# Test artifacts
+test_tolls.json
+
+# Package artifacts
+team03-toll-detection-release.tar.gz
+release/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Log files
+*.log

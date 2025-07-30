@@ -83,6 +83,41 @@ Breakdown:
 - Threshold Comparison: ~10-20ms
 - Result Decryption: ~5-10ms
 - Compilation:
-```
+```bash
+# Using Makefile (recommended)
+make                    # Build main executable
+make run               # Build and run
+make test              # Build and run unit tests
+make release           # Optimized build
+make clean             # Clean build artifacts
+
+# Manual compilation
 g++ -std=c++17 -O2 -Wall -I/usr/local/include/SEAL-4.1 -o encryption_demo encryption_demo.cpp -L/usr/local/lib -lseal-4.1
+```
+
+- Run:
+```bash
+# Using Makefile
+make run               # Build and run
+make profile           # Run with timing
+make benchmark         # Performance benchmark
+
+# Manual execution
+./encryption_demo
+```
+
+## Testing
+
+```bash
+# Install Google Test (macOS)
+brew install googletest
+
+# Install Google Test (Ubuntu)
+sudo apt-get install libgtest-dev
+
+# Build and run unit tests
+make test
+
+# Check dependencies
+make check-deps
 ```
