@@ -28,7 +28,6 @@ class MyBackgroundService : Service() {
     private suspend fun performLoginManually(email: String, password: String): String? { // Returns authToken string or null
         val apiUrl = "https://dev.a-to-be.com/mtolling/services/mtolling/login"
 
-        // Manually construct the JSON request body string
         val jsonRequestBody = """
             {
                 "email": "$email",
@@ -70,6 +69,103 @@ class MyBackgroundService : Service() {
         }
     }
 
+    private suspend fun fetchTolls(authToken: String): String? {
+        val apiUrl = "https://dev.a-to-be.com/mtolling/services/mtolling/tolls"
+        return try {
+            val response: HttpResponse = httpClient.get(apiUrl) {
+                header(HttpHeaders.Authorization, "Bearer $authToken")
+            }
+
+            Log.d(tag, "GET request to $apiUrl - Status: ${response.status}")
+            when (response.status) {
+                HttpStatusCode.OK -> {
+                    val responseBodyText = response.bodyAsText(Charsets.UTF_8)
+                    val jsonResponse = JSONObject(responseBodyText)
+                    val tollList = jsonResponse.optString("tollsList", "")
+                    Log.i(tag, "Data fetched successfully. TollsList: $tollList") // Changed to Log.i
+                    responseBodyText // Return the full response body text
+                }
+                HttpStatusCode.Unauthorized -> {
+                    Log.w(tag, "Token is invalid or expired (401 Unauthorized). Clearing token.")
+                    SecureStorage.clearAuthToken(applicationContext)
+                    null
+                }
+                else -> {
+                    val errorBody = response.bodyAsText(Charsets.UTF_8)
+                    Log.e(tag, "Error fetching data: ${response.status} - $errorBody")
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Exception during GET request to $apiUrl: ${e.message}", e)
+            null
+        }
+    }
+
+    private suspend fun postTrip(authToken: String, plate: String): String? {
+        val apiUrl = "https://dev.a-to-be.com/mtolling/services/mtolling/trips"
+
+        val jsonRequestBody = """
+            {
+                "licensePlate": "$plate",
+                "locations": [
+                    {
+                      "latitude": "38.657100000000000",
+                      "longitude": "-8.894200000000000",
+                      "altitude": 0,
+                      "timestamp": 2,
+                      "inHighway": "YES"
+                    },
+                    {
+                      "latitude": "38.656748619072500",
+                      "longitude": "-8.893693884252881",
+                      "altitude": 0,
+                      "timestamp": 2,
+                      "inHighway": "YES"
+                    },
+                    {
+                      "latitude": "38.656450000000000",
+                      "longitude": "-8.893000000000000",
+                      "altitude": 0,
+                      "timestamp": 2,
+                      "inHighway": "YES"
+                    }
+                ],
+                "startTripMethod": "",
+                "stopTripMethod": ""
+            }
+        """.trimIndent()
+
+        return try {
+            val response: HttpResponse = httpClient.post(apiUrl) {
+                header(HttpHeaders.Authorization, "Bearer $authToken")
+                contentType(ContentType.Application.Json)
+                setBody(jsonRequestBody)
+            }
+
+            val responseBodyText = response.bodyAsText(Charsets.UTF_8) // Specify charset if needed
+            Log.d("Post Trip", "Response Code: ${response.status}")
+
+            if (response.status == HttpStatusCode.OK) {
+                try {
+                    val jsonResponse = JSONObject(responseBodyText)
+                    val tripNumber = jsonResponse.optString("tripNumber", "")
+                    Log.e("Post Trip", "Trip: $jsonResponse")
+                    tripNumber
+                } catch (e: org.json.JSONException) {
+                    Log.e("Post Trip", "Failed to parse JSON response: ${e.message}", e)
+                    null
+                }
+            } else {
+                Log.e("Post Trip", "Trip post failed: ${response.status} - $responseBodyText")
+                null
+            }
+        } catch (e: Exception) {
+            Log.e("Post Trip", "Exception during trip post to $apiUrl: ${e.message}", e)
+            null
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.d(tag, "Service Created")
@@ -107,42 +203,12 @@ class MyBackgroundService : Service() {
                 Log.i(tag, "Existing token found. Using stored token.")
             }
 
+            val plate = BuildConfig.API_PLATE
+
             fetchTolls(currentToken)
+            postTrip(currentToken, plate)
         }
         return START_STICKY
-    }
-
-    private suspend fun fetchTolls(authToken: String): String? {
-        val apiUrl = "https://dev.a-to-be.com/mtolling/services/mtolling/tolls" // Replace with actual endpoint
-        return try {
-            val response: HttpResponse = httpClient.get(apiUrl) {
-                header(HttpHeaders.Authorization, "Bearer $authToken")
-            }
-
-            Log.d(tag, "GET request to $apiUrl - Status: ${response.status}")
-            when (response.status) {
-                HttpStatusCode.OK -> {
-                    val responseBodyText = response.bodyAsText(Charsets.UTF_8)
-                    val jsonResponse = JSONObject(responseBodyText)
-                    val tollList = jsonResponse.optString("tollsList", "")
-                    Log.i(tag, "Data fetched successfully. TollsList: $tollList") // Changed to Log.i
-                    responseBodyText // Return the full response body text
-                }
-                HttpStatusCode.Unauthorized -> {
-                    Log.w(tag, "Token is invalid or expired (401 Unauthorized). Clearing token.")
-                    SecureStorage.clearAuthToken(applicationContext)
-                    null
-                }
-                else -> {
-                    val errorBody = response.bodyAsText(Charsets.UTF_8) // Read body for error logging
-                    Log.e(tag, "Error fetching data: ${response.status} - $errorBody")
-                    null
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(tag, "Exception during GET request to $apiUrl: ${e.message}", e)
-            null
-        }
     }
 
     override fun onBind(intent: Intent): IBinder? {

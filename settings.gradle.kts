@@ -19,6 +19,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "BackgroundAutomotiveApp"
+rootProject.name = "BRISA"
 include(":automotive")
- 
+include(":locationprovider")
+include(":locationreceiver")

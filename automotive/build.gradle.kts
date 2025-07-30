@@ -22,6 +22,7 @@ android {
             isMinifyEnabled = false
             buildConfigField("String", "API_EMAIL", "\"${System.getenv("API_EMAIL") ?: project.properties["API_EMAIL"]}\"")
             buildConfigField("String", "API_PASSWORD", "\"${System.getenv("API_PASSWORD") ?: project.properties["API_PASSWORD"]}\"")
+            buildConfigField("String", "API_PLATE", "\"${System.getenv("API_PLATE") ?: project.properties["API_PLATE"]}\"")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -30,6 +31,7 @@ android {
         debug {
             buildConfigField("String", "API_EMAIL", "\"${System.getenv("API_EMAIL") ?: project.properties["API_EMAIL"]}\"")
             buildConfigField("String", "API_PASSWORD", "\"${System.getenv("API_PASSWORD") ?: project.properties["API_PASSWORD"]}\"")
+            buildConfigField("String", "API_PLATE", "\"${System.getenv("API_PLATE") ?: project.properties["API_PLATE"]}\"")
         }
     }
 
