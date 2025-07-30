@@ -22,7 +22,6 @@ import android.os.Process
 import android.os.RemoteException
 import com.example.common_aidl_interfaces.ILocationProvider
 import com.example.common_aidl_interfaces.ILocationReceiverCallback
-import com.example.locationreceiver.util.Geofence
 import com.example.locationreceiver.util.GeofencePoint
 import com.example.locationreceiver.util.Toll
 import kotlinx.serialization.json.Json
@@ -41,8 +40,6 @@ class LocationReceiverService : Service() {
     private var iLocationProvider: ILocationProvider? = null
     private var isBound = false
 
-    private val collectedLocationPoints = mutableListOf<LocationPoint>()
-    private val locationListLock = Any()
     private val tollList = mutableListOf<Toll>()
 
     private val serviceJob = Job()
@@ -60,7 +57,7 @@ class LocationReceiverService : Service() {
             timestamp: Long,
             accuracy: Float
         ) {
-            val i = Log.i(tag, "onNewLocationData: Lat=$latitude, Lon=$longitude, Time=$timestamp, Acc=$accuracy (from PID: ${Binder.getCallingPid()}, my PID: ${Process.myPid()})")
+            Log.i(tag, "onNewLocationData: Lat=$latitude, Lon=$longitude, Time=$timestamp, Acc=$accuracy (from PID: ${Binder.getCallingPid()}, my PID: ${Process.myPid()})")
             for (toll in tollList) {
                 for (geofence in toll.geofences) {
                     if (isPointInPolygon(latitude, longitude, geofence.geofencePoints )) {
@@ -69,8 +66,9 @@ class LocationReceiverService : Service() {
                         //Break (cant be anywhgere else)
                     }
                 }
-
             }
+            // perform more logic if we entered a CLOSED zone
+            // maybe a coroutine OR thread should be spawn to avoid blocking in the callback
         }
     }
 

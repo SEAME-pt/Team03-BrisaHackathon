@@ -17,6 +17,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="8dcaab41-ba24-4916-b16a-cf7142bb7934" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/locationreceiver/src/main/java/com/example/locationreceiver/LocationReceiverService.kt" beforeDir="false" afterPath="$PROJECT_DIR$/locationreceiver/src/main/java/com/example/locationreceiver/LocationReceiverService.kt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -83,6 +84,7 @@
     "RunOnceActivity.readMode.enableVisualFormatting": "true",
     "cf.first.check.clang-format": "false",
     "cidr.known.project.marker": "true",
+    "com.android.tools.idea.streaming.zoom.toolbar.visible": "false",
     "git-widget-placeholder": "locationreceiver",
     "kotlin-language-version-configured": "true",
     "last_opened_file_path": "/Users/Axel/AndroidStudioProjects/Team03-BrisaHackathon"
@@ -94,7 +96,7 @@
       <recent name="$PROJECT_DIR$/locationreceiver/src/main/java/com/example/locationreceiver/util" />
     </key>
   </component>
-  <component name="RunManager" selected="Android App.locationreceiver">
+  <component name="RunManager" selected="Android App.locationprovider">
     <configuration name="automotive" type="AndroidRunConfigurationType" factoryName="Android App" activateToolWindowBeforeRun="false">
       <module name="BRISA.automotive" />
       <option name="ANDROID_RUN_CONFIGURATION_SCHEMA_VERSION" value="1" />
