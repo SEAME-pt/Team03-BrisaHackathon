@@ -13,6 +13,7 @@ import io.ktor.utils.io.charsets.*
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import com.example.locationreceiver.util.SecureStorage
+import com.example.locationreceiver.util.TollsResponse
 import android.content.ComponentName
 import android.content.Context
 import android.content.ServiceConnection
@@ -21,8 +22,7 @@ import android.os.Process
 import android.os.RemoteException
 import com.example.common_aidl_interfaces.ILocationProvider
 import com.example.common_aidl_interfaces.ILocationReceiverCallback
-import java.util.regex.Pattern
-import kotlin.text.toDoubleOrNull
+import kotlinx.serialization.json.Json
 
 data class LocationPoint(
     val latitude: Double,
@@ -276,7 +276,13 @@ class LocationReceiverService : Service() {
 
             val plate = BuildConfig.API_PLATE
 
-            fetchTolls(currentToken)
+            val json = Json {
+                ignoreUnknownKeys = true // skips unknown fields
+            }
+            val json_string = fetchTolls(currentToken)
+            val parsed = json.decodeFromString<TollsResponse>(json_string.toString())
+            val tollsList = parsed.tolls
+            Log.i(tag, "Got ${tollsList.size} tolls")
             postTrip(currentToken, plate)
         }
         return START_STICKY

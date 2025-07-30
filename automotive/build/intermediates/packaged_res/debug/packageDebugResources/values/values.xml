@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BackgroundAutomotiveApp</string>
+    <style name="Theme.BackgroundAutomotiveApp" parent="android:Theme.Material.Light.DarkActionBar"/>
+</resources>

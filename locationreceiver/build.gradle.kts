@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.21"
 }
 
 android {
@@ -52,6 +53,7 @@ dependencies {
     implementation("io.ktor:ktor-client-cio:2.3.9")
     implementation("io.ktor:ktor-client-content-negotiation:2.3.9")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     testImplementation(libs.junit)
