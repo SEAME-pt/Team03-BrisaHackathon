@@ -35,13 +35,6 @@ data class LocationPoint(
     val inHighway: String = "YES"
 )
 
-data class TollWithCentroid(
-    val name: String,
-    val code: String,
-    val type: String,
-    val centroid: GeofencePoint,
-)
-
 class LocationReceiverService : Service() {
 
     private val tag = "LocationReceiverService"
@@ -50,8 +43,7 @@ class LocationReceiverService : Service() {
 
     private val collectedLocationPoints = mutableListOf<LocationPoint>()
     private val locationListLock = Any()
-    private val tollCentroids = mutableListOf<TollWithCentroid>()
-
+    private val tollList = mutableListOf<Toll>()
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob) // Background thread
@@ -69,6 +61,16 @@ class LocationReceiverService : Service() {
             accuracy: Float
         ) {
             val i = Log.i(tag, "onNewLocationData: Lat=$latitude, Lon=$longitude, Time=$timestamp, Acc=$accuracy (from PID: ${Binder.getCallingPid()}, my PID: ${Process.myPid()})")
+            for (toll in tollList) {
+                for (geofence in toll.geofences) {
+                    if (isPointInPolygon(latitude, longitude, geofence.geofencePoints )) {
+                        Log.d(tag, "point in ${toll.name}!")
+                        //Raise a flag if the toll is CLOSED
+                        //Break (cant be anywhgere else)
+                    }
+                }
+
+            }
         }
     }
 
@@ -149,7 +151,24 @@ class LocationReceiverService : Service() {
             null
         }
     }
-    
+
+    fun isPointInPolygon(lat: Double, lon: Double, polygon: List<GeofencePoint>): Boolean {
+        var inside = false
+        var j = polygon.size - 1
+        for (i in polygon.indices) {
+            val xi = polygon[i].latitude
+            val yi = polygon[i].longitude
+            val xj = polygon[j].latitude
+            val yj = polygon[j].longitude
+
+            val intersect = ((yi > lon) != (yj > lon)) &&
+                    (lat < (xj - xi) * (lon - yi) / (yj - yi + 0.0000001) + xi) // no div by zero
+            if (intersect) inside = !inside
+            j = i
+        }
+        return inside
+    }
+
     private suspend fun fetchTolls(authToken: String): String? {
         val apiUrl = "https://dev.a-to-be.com/mtolling/services/mtolling/tolls"
         return try {
@@ -294,36 +313,13 @@ class LocationReceiverService : Service() {
             val json_string = fetchTolls(currentToken)
             val parsed = json.decodeFromString<TollsResponse>(json_string.toString())
             Log.d(tag, "Got ${parsed.tolls.size} tolls")
-            parseTollResponse(parsed.tolls)
-            Log.d(tag, "calculated ${tollCentroids.size} tolls")
-
+            for (toll in parsed.tolls) {
+                tollList.add(toll)
+            }
 
             postTrip(currentToken, plate)
         }
         return START_STICKY
-    }
-
-    private fun computeCentroid(geofence: Geofence): GeofencePoint {
-        var sumLat = 0.0
-        var sumLon = 0.0
-
-        for (point in geofence.geofencePoints) {
-            sumLat += point.latitude
-            sumLon += point.longitude
-        }
-
-        val count = geofence.geofencePoints.size
-        return GeofencePoint(sumLat / count, sumLon / count)
-    }
-
-    private fun parseTollResponse(list: List<Toll>) {
-        for (toll in list) {
-            for (geofence in toll.geofences) {
-                val centroid = computeCentroid(geofence)
-                tollCentroids.add(TollWithCentroid(toll.name, toll.code, toll.type, centroid))
-                Log.d(tag, "${toll.name}, ${toll.code}")
-            }
-        }
     }
 
     private fun bindToRemoteService() {
