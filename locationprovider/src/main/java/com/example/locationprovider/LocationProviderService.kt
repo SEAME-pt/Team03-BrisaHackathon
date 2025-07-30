@@ -9,7 +9,6 @@ import android.content.pm.PackageManager
 import android.location.Location
 import com.google.android.gms.location.*
 import android.os.Binder
-import android.os.Build
 import android.os.IBinder
 import android.os.Looper
 import android.os.Process
@@ -18,8 +17,8 @@ import android.os.RemoteException
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
-import com.example.common_aidl_interfaces.ILocationService
-import com.example.common_aidl_interfaces.IMyCallback
+import com.example.common_aidl_interfaces.ILocationProvider
+import com.example.common_aidl_interfaces.ILocationReceiverCallback
 
 class LocationProviderService : Service() {
 
@@ -27,25 +26,21 @@ class LocationProviderService : Service() {
     private val NOTIFICATION_CHANNEL_ID = "LocationProviderChannel"
     private val NOTIFICATION_ID = 123 // Unique ID for your notification
 
-    private val mCallbacks = RemoteCallbackList<IMyCallback>()
-
-    // For location updates
-    private var currentLatitude: Double? = null
-    private var currentLongitude: Double? = null
+    private val mCallbacks = RemoteCallbackList<ILocationReceiverCallback>()
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
 
     // Binder implementation (remains mostly the same)
-    private val binder = object : ILocationService.Stub() {
-        override fun registerCallback(callback: IMyCallback?) {
+    private val binder = object : ILocationProvider.Stub() {
+        override fun registerCallback(callback: ILocationReceiverCallback?) {
             callback?.let {
                 mCallbacks.register(it)
                 Log.d(TAG, "Callback registered from PID: ${Binder.getCallingPid()}")
             }
         }
 
-        override fun unregisterCallback(callback: IMyCallback?) {
+        override fun unregisterCallback(callback: ILocationReceiverCallback?) {
             callback?.let {
                 mCallbacks.unregister(it)
                 Log.d(TAG, "Callback unregistered from PID: ${Binder.getCallingPid()}")
@@ -69,25 +64,22 @@ class LocationProviderService : Service() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
                 locationResult.lastLocation?.let { location ->
-                    currentLatitude = location.latitude
-                    currentLongitude = location.longitude
-                    Log.d(TAG, "Location Update: Lat: $currentLatitude, Lon: $currentLongitude, Accuracy: ${location.accuracy}m")
+                    Log.d(TAG, "Location Update: Lat: $location.latitude, Lon: $location.longitude, Accuracy: ${location.accuracy}m")
+                    broadcastLocationData(location)
                 }
             }
         }
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(
-                NOTIFICATION_CHANNEL_ID,
-                "Location Service Channel",
-                NotificationManager.IMPORTANCE_DEFAULT
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(serviceChannel)
-            Log.d(TAG, "Notification channel created")
-        }
+        val serviceChannel = NotificationChannel(
+            NOTIFICATION_CHANNEL_ID,
+            "Location Service Channel",
+            NotificationManager.IMPORTANCE_DEFAULT
+        )
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.createNotificationChannel(serviceChannel)
+        Log.d(TAG, "Notification channel created")
     }
 
     private fun startForegroundServiceWithNotification() {
@@ -96,9 +88,8 @@ class LocationProviderService : Service() {
         val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("Car Location Tracker")
             .setContentText("Tracking car location...")
-            .setSmallIcon(R.mipmap.ic_launcher) // Replace with your app's icon
-            // .setContentIntent(pendingIntent) // If you have a pending intent
-            .setOngoing(true) // Makes the notification non-dismissable by swipe
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setOngoing(true)
             .build()
 
         startForeground(NOTIFICATION_ID, notification)
@@ -132,10 +123,7 @@ class LocationProviderService : Service() {
     private fun startLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             Log.e(TAG, "Location permission not granted. Cannot start updates.")
-            // In a real app, you'd request permission from an Activity before starting the service.
-            // Since this is a service, we assume permission is already granted.
-            // If not, the system will block location access.
-            stopSelf() // Stop the service if permission is missing
+            stopSelf()
             return
         }
 
@@ -152,13 +140,6 @@ class LocationProviderService : Service() {
         }
     }
 
-    private fun stopLocationService() {
-        Log.d(TAG, "Stopping location service")
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-        stopForeground(STOP_FOREGROUND_REMOVE) // For API 24+ remove notification, true also works
-        stopSelf() // Stops the service
-    }
-
     override fun onBind(intent: Intent): IBinder? {
         Log.d(TAG, "Service onBind called.")
         return binder
@@ -173,15 +154,9 @@ class LocationProviderService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        stopLocationService()
-        mCallbacks.kill() // Unregister all callbacks
-        // If started with startForeground, it needs to be stopped explicitly to remove notification
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+        mCallbacks.kill()
+        stopForeground(STOP_FOREGROUND_REMOVE)
         Log.d(TAG, "Service Destroyed")
     }
 }

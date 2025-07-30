@@ -13,21 +13,20 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         Log.d(TAG_MAIN, "MainActivity onCreate called")
 
-        Log.i(TAG_MAIN, "Attempting to start ClientAIDLService from MainActivity...")
+        Log.i(TAG_MAIN, "Attempting to start LocationReceiverService from MainActivity...")
         startOurService()
 
-        // Você pode querer fechar a Activity depois de iniciar o serviço se ela não tem UI
-        // finish()
+        finish()
     }
 
     private fun startOurService() {
-        val serviceIntent = Intent(this, ClientAIDLService::class.java)
+        val serviceIntent = Intent(this, LocationReceiverService::class.java)
 
         try {
             startService(serviceIntent)
-            Log.i(TAG_MAIN, "startService(ClientAIDLService) called successfully from MainActivity.")
+            Log.i(TAG_MAIN, "startService(LocationReceiverService) called successfully from MainActivity.")
         } catch (e: Exception) {
-            Log.e(TAG_MAIN, "Error starting ClientAIDLService from MainActivity: ${e.message}", e)
+            Log.e(TAG_MAIN, "Error starting LocationReceiverService from MainActivity: ${e.message}", e)
         }
     }
 

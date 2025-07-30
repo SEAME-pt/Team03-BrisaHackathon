@@ -1,18 +1,18 @@
-// ILocationService.aidl
+// ILocationProvider.aidl
 package com.example.common_aidl_interfaces;
 
-import com.example.common_aidl_interfaces.IMyCallback;
+import com.example.common_aidl_interfaces.ILocationReceiverCallback;
 
-interface ILocationService {
+interface ILocationProvider {
         /**
          * Registers a callback for the client to receive updates.
          */
-        void registerCallback(IMyCallback callback);
+        void registerCallback(ILocationReceiverCallback callback);
 
         /**
          * Unregisters a callback.
          */
-        void unregisterCallback(IMyCallback callback);
+        void unregisterCallback(ILocationReceiverCallback callback);
 
         /**
          * A simple method the client can call (optional for this example).
