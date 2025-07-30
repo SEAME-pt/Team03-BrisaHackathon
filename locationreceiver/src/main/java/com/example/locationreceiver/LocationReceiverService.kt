@@ -26,11 +26,16 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import com.example.locationreceiver.util.GeofencePoint
 import com.example.locationreceiver.util.Toll
 import kotlinx.serialization.json.Json
 import org.json.JSONArray
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import java.util.Locale
+import java.util.UUID
 
 data class LocationPoint(
     val latitude: Double,
@@ -40,7 +45,11 @@ data class LocationPoint(
     val inHighway: String = "YES"
 )
 
-class LocationReceiverService : Service() {
+class LocationReceiverService : Service(), TextToSpeech.OnInitListener {
+
+    private lateinit var tts: TextToSpeech
+    private var ttsInitialized = false
+    private val speechQueue = ArrayDeque<String>()
 
     private val tag = "LocationReceiverService"
     private val NOTIFICATION_CHANNEL_ID = "LocationReceiverChannel"
@@ -62,14 +71,14 @@ class LocationReceiverService : Service() {
         }
     }
 
-    private val LocationCallback = object : ILocationReceiverCallback.Stub() {
+    private val locationCallback = object : ILocationReceiverCallback.Stub() {
         override fun onNewLocationData(
             latitude: Double,
             longitude: Double,
             timestamp: Long,
             accuracy: Float
         ) {
-            val i = Log.i(tag, "onNewLocationData: Lat=$latitude, Lon=$longitude, Time=$timestamp, Acc=$accuracy (from PID: ${Binder.getCallingPid()}, my PID: ${Process.myPid()})")
+            Log.i(tag, "onNewLocationData: Lat=$latitude, Lon=$longitude, Time=$timestamp, Acc=$accuracy (from PID: ${Binder.getCallingPid()}, my PID: ${Process.myPid()})")
             for (toll in tollList) {
                 for (geofence in toll.geofences) {
                     if (isPointInPolygon(latitude, longitude, geofence.geofencePoints )) {
@@ -102,9 +111,13 @@ class LocationReceiverService : Service() {
                 if (closedTollBuffer == null) {
                     closedTollBuffer = eventToll
                     collectedLocationPoints.add(eventPoint)
+                    val messageToSpeak = "Nova viagem iniciada em ${eventToll.name}."
+                    speak(messageToSpeak)
                 } else if (closedTollBuffer != eventToll) {
                     closedTollBuffer = null
                     collectedLocationPoints.add(eventPoint)
+                    val messageToSpeak = "Viagem concluida em ${eventToll.name}."
+                    speak(messageToSpeak)
                     postTrip(authToken, plate, collectedLocationPoints)
                     collectedLocationPoints.clear()
                 }
@@ -134,7 +147,7 @@ class LocationReceiverService : Service() {
             Log.d(tag, "Connected to LocationProvider and TollsProvider.")
 
             try {
-                iLocationProvider?.registerCallback(LocationCallback)
+                iLocationProvider?.registerCallback(locationCallback)
                 Log.d(tag, "Callback registered with LocationProvider and TollsProvider.")
 
             } catch (e: RemoteException) {
@@ -320,8 +333,8 @@ class LocationReceiverService : Service() {
                 try {
                     val jsonResponse = JSONObject(responseBodyText)
                     val tripNumber = jsonResponse.optString("tripNumber", jsonResponse.optString("id", ""))
-                    Log.i(tag, "Trip posted successfully (with argument). Response: $jsonResponse")
-                    // Return trip number or a success indicator
+                    Log.i(tag, "Trip posted successfully. Response: $jsonResponse")
+
                     if (tripNumber.isEmpty()) "SUCCESS_NO_TRIP_ID" else tripNumber
                 } catch (e: org.json.JSONException) {
                     Log.e(tag, "Failed to parse JSON from successful postTrip response: ${e.message}. Body: $responseBodyText", e)
@@ -337,11 +350,91 @@ class LocationReceiverService : Service() {
         }
     }
 
+    // OnInitListener callback
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            // Set language (optional, defaults to device locale)
+            // val result = tts.setLanguage(Locale.US) // Example: US English
+            val result = tts.setLanguage(Locale("pt", "PT"))
+
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                Log.e(tag, "TTS: The Language specified is not supported!")
+                // Optionally, try to install missing language data
+                // val installIntent = Intent()
+                // installIntent.action = TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA
+                // installIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                // startActivity(installIntent)
+            } else {
+                ttsInitialized = true
+                Log.i(tag, "TTS Initialization successful.")
+                // Process any queued messages
+                while (speechQueue.isNotEmpty() && ttsInitialized) {
+                    speak(speechQueue.removeFirst())
+                }
+            }
+        } else {
+            Log.e(tag, "TTS Initialization Failed! Status: $status")
+        }
+    }
+
+    // Method to speak text
+    private fun speak(text: String, queueMode: Int = TextToSpeech.QUEUE_ADD) {
+        if (!ttsInitialized) {
+            Log.w(tag, "TTS not initialized yet. Queuing message: $text")
+            speechQueue.addLast(text) // Add to the end of the queue
+            // Attempt to re-initialize if it failed previously or wasn't called
+            if (!::tts.isInitialized || tts.defaultEngine.isNullOrEmpty()) {
+                Log.d(tag, "Re-attempting TTS initialization as it seems to be in a bad state.")
+                tts = TextToSpeech(this, this)
+            }
+            return
+        }
+
+        // Generate a unique ID for each utterance (optional but good for tracking)
+        val utteranceId = UUID.randomUUID().toString()
+        val params = Bundle() // Use Bundle for parameters
+
+        // On Android Lollipop (API 21) and above, you can pass an utteranceId.
+        // For older versions, this might not be available or might work differently.
+        // The speak method itself handles API level differences for utteranceId.
+
+        // Default to QUEUE_ADD so messages don't interrupt each other unless desired
+        // Use TextToSpeech.QUEUE_FLUSH to interrupt current speech
+        val result = tts.speak(text, queueMode, params, utteranceId)
+        if (result == TextToSpeech.ERROR) {
+            Log.e(tag, "Error speaking text: $text")
+        } else {
+            Log.d(tag, "TTS speaking: $text (Utterance ID: $utteranceId)")
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         Log.d(tag, "Client Service Created.")
         createNotificationChannel()
+
+        // Initialize TextToSpeech
+        tts = TextToSpeech(this, this) // 'this' refers to OnInitListener
+
+        // Optional: Set a progress listener to know when speech starts/ends
+        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {
+                Log.d(tag, "TTS started: $utteranceId")
+            }
+
+            override fun onDone(utteranceId: String?) {
+                Log.d(tag, "TTS finished: $utteranceId")
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) {
+                Log.e(tag, "TTS error: $utteranceId")
+            }
+
+            override fun onError(utteranceId: String?, errorCode: Int) {
+                Log.e(tag, "TTS error with code $errorCode: $utteranceId")
+            }
+        })
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -398,14 +491,18 @@ class LocationReceiverService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(
-                NOTIFICATION_CHANNEL_ID,
-                "Location Receiver Service Channel", // User-visible name
-                NotificationManager.IMPORTANCE_DEFAULT // Or IMPORTANCE_LOW if appropriate
-            )
+            // Foreground service channel (you likely have this)
+            val foregroundServiceChannel = NotificationChannel(
+                NOTIFICATION_CHANNEL_ID, // Your existing foreground channel ID
+                "Toll Tracking Service",
+                NotificationManager.IMPORTANCE_LOW // Or your preferred importance
+            ).apply {
+                description = "Notification for the active toll tracking service."
+            }
+
             val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(serviceChannel)
-            Log.d(tag, "Notification channel created.")
+            manager?.createNotificationChannel(foregroundServiceChannel)
+            Log.d(tag, "Notification channels created/updated.")
         }
     }
 
@@ -435,7 +532,7 @@ class LocationReceiverService : Service() {
     private fun unbindFromRemoteService() {
         if (isBound) {
             try {
-                iLocationProvider?.unregisterCallback(LocationCallback)
+                iLocationProvider?.unregisterCallback(locationCallback)
                 Log.d(tag, "Callback unregistered from LocationProviderService.")
             } catch (e: RemoteException) {
                 Log.e(tag, "Error unregistering callback: ${e.message}")
@@ -458,6 +555,12 @@ class LocationReceiverService : Service() {
     }
 
     override fun onDestroy() {
+        // Shutdown TTS
+        if (::tts.isInitialized) {
+            tts.stop()
+            tts.shutdown()
+            Log.d(tag, "TTS shutdown.")
+        }
         super.onDestroy()
         Log.d(tag, "Client Service Destroyed.")
         serviceJob.cancel()
