@@ -103,7 +103,7 @@ class LocationProviderService : Service() {
         val n = mCallbacks.beginBroadcast()
         for (i in 0 until n) {
             try {
-                mCallbacks.getBroadcastItem(i).onDataReceived(dataToSend)
+                mCallbacks.getBroadcastItem(i).onNewLocationData(location.latitude, location.longitude, location.time, location.accuracy)
             } catch (e: RemoteException) {
                 Log.e(TAG, "Error sending data to callback: ${e.message}")
             }

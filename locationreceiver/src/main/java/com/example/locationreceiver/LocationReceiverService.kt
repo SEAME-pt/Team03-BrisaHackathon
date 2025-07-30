@@ -24,17 +24,73 @@ import com.example.common_aidl_interfaces.ILocationReceiverCallback
 import java.util.regex.Pattern
 import kotlin.text.toDoubleOrNull
 
+data class LocationPoint(
+    val latitude: Double,
+    val longitude: Double,
+    val timestamp: Long,
+    val altitude: Double = 0.0,
+    val inHighway: String = "YES"
+)
+
 class LocationReceiverService : Service() {
 
     private val tag = "LocationReceiverService"
     private var iLocationProvider: ILocationProvider? = null
     private var isBound = false
 
+    private val collectedLocationPoints = mutableListOf<LocationPoint>()
+    private val locationListLock = Any()
+
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob) // Background thread
 
     private val httpClient by lazy {
         HttpClient(CIO) {
+        }
+    }
+
+    private val LocationCallback = object : ILocationReceiverCallback.Stub() {
+        override fun onNewLocationData(
+            latitude: Double,
+            longitude: Double,
+            timestamp: Long,
+            accuracy: Float
+        ) {
+            val i = Log.i(tag, "onNewLocationData: Lat=$latitude, Lon=$longitude, Time=$timestamp, Acc=$accuracy (from PID: ${Binder.getCallingPid()}, my PID: ${Process.myPid()})")
+        }
+    }
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(className: ComponentName, service: IBinder) {
+            iLocationProvider = ILocationProvider.Stub.asInterface(service)
+            isBound = true
+            Log.d(tag, "Connected to LocationProvider and TollsProvider.")
+
+            try {
+                iLocationProvider?.registerCallback(LocationCallback)
+                Log.d(tag, "Callback registered with LocationProvider and TollsProvider.")
+
+            } catch (e: RemoteException) {
+                Log.e(tag, "Error during onServiceConnected: ${e.message}")
+            }
+        }
+
+        override fun onServiceDisconnected(className: ComponentName) {
+            Log.e(tag, "Disconnected from LocationProviderService (Process crashed?)")
+            cleanupConnection()
+        }
+
+        override fun onBindingDied(name: ComponentName?) {
+            Log.e(tag, "Binding Died for LocationProviderService component: $name")
+            cleanupConnection()
+            // Consider attempting to re-bind after a delay if persistent connection is critical
+        }
+
+        override fun onNullBinding(name: ComponentName?) {
+            Log.e(tag, "Null Binding for LocationProviderService component: $name - Service might not be running or exported correctly in App A.")
+            // Service not found or onBind returned null in App A.
+            // No need to call cleanupConnection() as nothing was bound.
+            stopSelf() // Stop this client service if it can't bind.
         }
     }
 
@@ -96,7 +152,7 @@ class LocationReceiverService : Service() {
                     val jsonResponse = JSONObject(responseBodyText)
                     val tollList = jsonResponse.optString("tollsList", "")
                     Log.i(tag, "Data fetched successfully. TollsList: $tollList") // Changed to Log.i
-                    responseBodyText // Return the full response body text
+                    responseBodyText
                 }
                 HttpStatusCode.Unauthorized -> {
                     Log.w(tag, "Token is invalid or expired (401 Unauthorized). Clearing token.")
@@ -176,72 +232,6 @@ class LocationReceiverService : Service() {
         } catch (e: Exception) {
             Log.e("Post Trip", "Exception during trip post to $apiUrl: ${e.message}", e)
             null
-        }
-    }
-
-    private val LocationCallback = object : ILocationReceiverCallback.Stub() {
-        override fun onDataReceived(data: String?) {
-            Log.i(tag, "onDataReceived: $data (from PID: ${Binder.getCallingPid()}, my PID: ${Process.myPid()})")
-
-            if (data != null) {
-                try {
-                    // Regex to find "Lat=" followed by a number and "Lon=" followed by a number
-                    val pattern = Pattern.compile("Lat=(-?\\d+\\.?\\d*).*Lon=(-?\\d+\\.?\\d*)")
-                    val matcher = pattern.matcher(data)
-
-                    if (matcher.find()) {
-                        val latitudeString = matcher.group(1)
-                        val longitudeString = matcher.group(2)
-
-                        val latitude = latitudeString?.toDoubleOrNull()
-                        val longitude = longitudeString?.toDoubleOrNull()
-
-                        if (latitude != null && longitude != null) {
-                            Log.i(tag, "Parsed Latitude (Regex): $latitude, Parsed Longitude (Regex): $longitude")
-                        } else {
-                            Log.e(tag, "Failed to parse numbers from regex match: Lat='$latitudeString', Lon='$longitudeString'")
-                        }
-                    } else {
-                        Log.e(tag, "Could not find Lat/Lon pattern in data: $data")
-                    }
-                } catch (e: Exception) {
-                    Log.e(tag, "Error parsing location data with regex: ${e.message}", e)
-                }
-            }
-        }
-    }
-
-    private val connection = object : ServiceConnection {
-        override fun onServiceConnected(className: ComponentName, service: IBinder) {
-            iLocationProvider = ILocationProvider.Stub.asInterface(service)
-            isBound = true
-            Log.d(tag, "Connected to LocationProvider and TollsProvider.")
-
-            try {
-                iLocationProvider?.registerCallback(LocationCallback)
-                Log.d(tag, "Callback registered with LocationProvider and TollsProvider.")
-
-            } catch (e: RemoteException) {
-                Log.e(tag, "Error during onServiceConnected: ${e.message}")
-            }
-        }
-
-        override fun onServiceDisconnected(className: ComponentName) {
-            Log.e(tag, "Disconnected from LocationProviderService (Process crashed?)")
-            cleanupConnection()
-        }
-
-        override fun onBindingDied(name: ComponentName?) {
-            Log.e(tag, "Binding Died for LocationProviderService component: $name")
-            cleanupConnection()
-            // Consider attempting to re-bind after a delay if persistent connection is critical
-        }
-
-        override fun onNullBinding(name: ComponentName?) {
-            Log.e(tag, "Null Binding for LocationProviderService component: $name - Service might not be running or exported correctly in App A.")
-            // Service not found or onBind returned null in App A.
-            // No need to call cleanupConnection() as nothing was bound.
-            stopSelf() // Stop this client service if it can't bind.
         }
     }
 
