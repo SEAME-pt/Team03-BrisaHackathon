@@ -22,6 +22,9 @@ import android.os.Process
 import android.os.RemoteException
 import com.example.common_aidl_interfaces.ILocationProvider
 import com.example.common_aidl_interfaces.ILocationReceiverCallback
+import com.example.locationreceiver.util.Geofence
+import com.example.locationreceiver.util.GeofencePoint
+import com.example.locationreceiver.util.Toll
 import kotlinx.serialization.json.Json
 
 data class LocationPoint(
@@ -32,6 +35,13 @@ data class LocationPoint(
     val inHighway: String = "YES"
 )
 
+data class TollWithCentroid(
+    val name: String,
+    val code: String,
+    val type: String,
+    val centroid: GeofencePoint,
+)
+
 class LocationReceiverService : Service() {
 
     private val tag = "LocationReceiverService"
@@ -40,6 +50,8 @@ class LocationReceiverService : Service() {
 
     private val collectedLocationPoints = mutableListOf<LocationPoint>()
     private val locationListLock = Any()
+    private val tollCentroids = mutableListOf<TollWithCentroid>()
+
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob) // Background thread
@@ -137,7 +149,7 @@ class LocationReceiverService : Service() {
             null
         }
     }
-
+    
     private suspend fun fetchTolls(authToken: String): String? {
         val apiUrl = "https://dev.a-to-be.com/mtolling/services/mtolling/tolls"
         return try {
@@ -281,11 +293,37 @@ class LocationReceiverService : Service() {
             }
             val json_string = fetchTolls(currentToken)
             val parsed = json.decodeFromString<TollsResponse>(json_string.toString())
-            val tollsList = parsed.tolls
-            Log.i(tag, "Got ${tollsList.size} tolls")
+            Log.d(tag, "Got ${parsed.tolls.size} tolls")
+            parseTollResponse(parsed.tolls)
+            Log.d(tag, "calculated ${tollCentroids.size} tolls")
+
+
             postTrip(currentToken, plate)
         }
         return START_STICKY
+    }
+
+    private fun computeCentroid(geofence: Geofence): GeofencePoint {
+        var sumLat = 0.0
+        var sumLon = 0.0
+
+        for (point in geofence.geofencePoints) {
+            sumLat += point.latitude
+            sumLon += point.longitude
+        }
+
+        val count = geofence.geofencePoints.size
+        return GeofencePoint(sumLat / count, sumLon / count)
+    }
+
+    private fun parseTollResponse(list: List<Toll>) {
+        for (toll in list) {
+            for (geofence in toll.geofences) {
+                val centroid = computeCentroid(geofence)
+                tollCentroids.add(TollWithCentroid(toll.name, toll.code, toll.type, centroid))
+                Log.d(tag, "${toll.name}, ${toll.code}")
+            }
+        }
     }
 
     private fun bindToRemoteService() {

@@ -3,6 +3,8 @@ package com.example.locationreceiver.util
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
+// Those data structure are define in a way they are automatically deserializable by kotlin plugin.
+//Ultimately the one that matters is the TollsResponse which is then use to compute centroids
 @Serializable
 data class GeofencePoint(
     val latitude: Double,
