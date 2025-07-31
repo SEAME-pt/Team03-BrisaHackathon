@@ -139,28 +139,23 @@ class LocationReceiverService : Service() {
     private suspend fun checkTollZones(currentLocation: LocationPoint) {
         var enteredToll: Toll? = null
 
-        // Check cached tolls for entry
+        // check if current location is inside any cached toll zone
         for (toll in tollCache) {
             for (geofence in toll.geofences) {
                 if (isPointInPolygon(currentLocation.latitude, currentLocation.longitude, geofence.geofencePoints)) {
-                    Log.d(tag, "Entered toll zone: ${toll.name}")
                     enteredToll = toll
-                    break // can't be in multiple toll
-                }
-            }
-        }
-
-        // check if we exited the current closed toll zone
-        lastClosedToll?.let { closedToll ->
-            var stillInside = false
-            for (geofence in closedToll.geofences) {
-                if (isPointInPolygon(currentLocation.latitude, currentLocation.longitude, geofence.geofencePoints)) {
-                    stillInside = true
+                    Log.d(tag, "Entered toll zone: ${toll.name}")
                     break
                 }
             }
+            if (enteredToll != null) break // No need to keep checking
+        }
 
-            // if we went out we can clear the last closed toll and send the api the infos
+        lastClosedToll?.let { closedToll ->
+            val stillInside = closedToll.geofences.any { geofence ->
+                isPointInPolygon(currentLocation.latitude, currentLocation.longitude, geofence.geofencePoints)
+            }
+
             if (!stillInside) {
                 Log.d(tag, "Exited closed toll zone: ${closedToll.name}")
                 handleClosedTollExit(closedToll, currentLocation)
@@ -168,10 +163,12 @@ class LocationReceiverService : Service() {
             }
         }
 
-        if (enteredToll != null) {
-            handleTollEntry(enteredToll, currentLocation)
+        // handle new toll entry (OPEN or CLOSED)
+        enteredToll?.let {
+            handleTollEntry(it, currentLocation)
         }
     }
+
 
     private suspend fun handleTollEntry(toll: Toll, location: LocationPoint) {
         val tollState = determineTollState(toll)
@@ -182,21 +179,8 @@ class LocationReceiverService : Service() {
                 handleOpenToll(toll, location)
             }
             TollState.CLOSED -> {
-                // Check if we're already in this specific closed toll
-                if (lastClosedToll?.code != toll.code) {
-                    // If we're in a different closed toll, exit it first
-                    lastClosedToll?.let { previousToll ->
-                        Log.i(tag, "Exiting previous closed toll: ${previousToll.name}")
-                        handleClosedTollExit(previousToll, location)
-                    }
-
-                    // Enter the new closed toll
-                    Log.i(tag, "Entering CLOSED toll zone: ${toll.name}")
-                    lastClosedToll = toll
-                    handleClosedTollEntry(toll, location)
-                } else {
-                    // We're already in this closed toll, do nothing (avoid duplicate entries)
-                    Log.d(tag, "Already in closed toll zone: ${toll.name}")
+                Log.i(tag, "Processing CLOSED toll: ${toll.name}")
+                lastClosedToll = toll // if we are here, this variable is empty
                 }
             }
         }

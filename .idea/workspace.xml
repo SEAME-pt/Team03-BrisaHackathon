@@ -17,12 +17,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="8dcaab41-ba24-4916-b16a-cf7142bb7934" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.gradle/8.11.1/fileHashes/fileHashes.lock" beforeDir="false" afterPath="$PROJECT_DIR$/.gradle/8.11.1/fileHashes/fileHashes.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/gradle.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/gradle.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/locationreceiver/src/main/java/com/example/locationreceiver/LocationReceiverService.kt" beforeDir="false" afterPath="$PROJECT_DIR$/locationreceiver/src/main/java/com/example/locationreceiver/LocationReceiverService.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/locationreceiver/src/main/java/com/example/locationreceiver/util/TollModels.kt" beforeDir="false" afterPath="$PROJECT_DIR$/locationreceiver/src/main/java/com/example/locationreceiver/util/TollModels.kt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
