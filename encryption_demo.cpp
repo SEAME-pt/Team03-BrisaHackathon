@@ -38,10 +38,20 @@ struct EncryptedBoundingBox {
     double privacy_radius;
 };
 
-// Simplified spatial index - only what we actually use
+// SIMD-packed toll zone batch for parallel processing
+struct SIMDTollBatch {
+    vector<int> toll_indices;           // Original toll zone indices
+    vector<string> toll_codes;          // Corresponding toll codes
+    Ciphertext packed_lat_centroids;    // SIMD-packed latitude centroids
+    Ciphertext packed_lon_centroids;    // SIMD-packed longitude centroids
+    size_t batch_size;                  // Number of toll zones in this batch
+};
+
+// Simplified spatial index with SIMD optimization
 struct SpatialIndex {
     vector<EncryptedBoundingBox> latitude_boundaries;  // For binary search
     vector<vector<int>> band_to_zones;                 // Maps latitude bands to toll zones
+    vector<vector<SIMDTollBatch>> simd_batches;        // SIMD-packed toll batches per band
 };
 
 struct TollZone {
@@ -54,6 +64,7 @@ struct TollZone {
     string type;
     vector<pair<Ciphertext, Ciphertext>> encrypted_centroids;
     int latitude_band_id;
+    int simd_slot_index;  // Index within SIMD-packed ciphertext
 };
 
 struct GeofenceResult {
@@ -70,8 +81,10 @@ vector<Geofence> parseGeofencesArray(const string& json);
 Geofence parseSingleGeofence(const string& json);
 vector<GeofencePoint> parseGeofencePointsArray(const string& json);
 void preEncryptCentroids(vector<TollZone>& tollZones, Encryptor& encryptor, CKKSEncoder& encoder, double scale);
+vector<SIMDTollBatch> createSIMDBatches(const vector<int>& toll_indices, const vector<TollZone>& tollZones, Encryptor& encryptor, CKKSEncoder& encoder, double scale);
 SpatialIndex buildSpatialIndex(vector<TollZone>& tollZones, Encryptor& encryptor, Evaluator& evaluator, Decryptor& decryptor, CKKSEncoder& encoder, double scale);
 vector<int> getRelevantTollZones(double gps_lat, double gps_lon, const SpatialIndex& spatial_index, Evaluator& evaluator, Encryptor& encryptor, Decryptor& decryptor, CKKSEncoder& encoder, double scale);
+vector<GeofenceResult> checkLocationInGeofencesSIMD(double gps_lat, double gps_lon, const SIMDTollBatch& batch, const vector<TollZone>& tollZones, Evaluator& evaluator, Encryptor& encryptor, Decryptor& decryptor, CKKSEncoder& encoder, double scale);
 GeofenceResult checkLocationInGeofences(double gps_lat, double gps_lon, const TollZone& tollZone, Evaluator& evaluator, Encryptor& encryptor, Decryptor& decryptor, CKKSEncoder& encoder, double scale);
 
 // Load toll zones from JSON file  
@@ -356,7 +369,63 @@ vector<GeofencePoint> parseGeofencePointsArray(const string& json) {
     return points;
 }
 
-// Build simplified spatial index
+// Create SIMD-packed batches for parallel toll zone processing
+vector<SIMDTollBatch> createSIMDBatches(const vector<int>& toll_indices, 
+                                        const vector<TollZone>& tollZones,
+                                        Encryptor& encryptor, CKKSEncoder& encoder, double scale) {
+    vector<SIMDTollBatch> batches;
+    const size_t SIMD_BATCH_SIZE = 8;  // Process 8 toll zones in parallel
+    
+    for (size_t i = 0; i < toll_indices.size(); i += SIMD_BATCH_SIZE) {
+        SIMDTollBatch batch;
+        size_t batch_end = min(i + SIMD_BATCH_SIZE, toll_indices.size());
+        batch.batch_size = batch_end - i;
+        
+        // Collect toll zone data for this batch
+        vector<double> lat_centroids, lon_centroids;
+        for (size_t j = i; j < batch_end; j++) {
+            int toll_idx = toll_indices[j];
+            batch.toll_indices.push_back(toll_idx);
+            batch.toll_codes.push_back(tollZones[toll_idx].code);
+            
+            // For simplicity, use first geofence centroid
+            if (!tollZones[toll_idx].geofences.empty()) {
+                const auto& geofence = tollZones[toll_idx].geofences[0];
+                double centroid_lat = 0, centroid_lon = 0;
+                
+                for (const auto& point : geofence.geofencePoints) {
+                    centroid_lat += point.latitude;
+                    centroid_lon += point.longitude;
+                }
+                centroid_lat /= geofence.geofencePoints.size();
+                centroid_lon /= geofence.geofencePoints.size();
+                
+                lat_centroids.push_back(centroid_lat);
+                lon_centroids.push_back(centroid_lon);
+            }
+        }
+        
+        // Pad with zeros if batch is not full
+        while (lat_centroids.size() < SIMD_BATCH_SIZE) {
+            lat_centroids.push_back(0.0);
+            lon_centroids.push_back(0.0);
+        }
+        
+        // Create SIMD-packed ciphertexts
+        Plaintext plain_lat_batch, plain_lon_batch;
+        encoder.encode(lat_centroids, scale, plain_lat_batch);
+        encoder.encode(lon_centroids, scale, plain_lon_batch);
+        
+        encryptor.encrypt(plain_lat_batch, batch.packed_lat_centroids);
+        encryptor.encrypt(plain_lon_batch, batch.packed_lon_centroids);
+        
+        batches.push_back(batch);
+    }
+    
+    return batches;
+}
+
+// Build simplified spatial index with SIMD optimization
 SpatialIndex buildSpatialIndex(vector<TollZone>& tollZones, 
                               Encryptor& encryptor, Evaluator& evaluator,
                               Decryptor& decryptor, CKKSEncoder& encoder, double scale) {
@@ -438,8 +507,18 @@ SpatialIndex buildSpatialIndex(vector<TollZone>& tollZones,
     
     index.band_to_zones = latitude_bands;
     
+    // Create SIMD batches for each latitude band
+    index.simd_batches.resize(latitude_bands.size());
+    for (size_t band = 0; band < latitude_bands.size(); band++) {
+        if (!latitude_bands[band].empty()) {
+            index.simd_batches[band] = createSIMDBatches(
+                latitude_bands[band], tollZones, encryptor, encoder, scale);
+        }
+    }
+    
     cout << "Index built: " << latitude_lines.size() << " boundaries, " 
          << latitude_bands.size() << " bands, " << tollZones.size() << " toll zones" << endl;
+    cout << "SIMD optimization: Created batches for parallel processing" << endl;
     
     return index;
 }
@@ -531,6 +610,90 @@ void preEncryptCentroids(vector<TollZone>& tollZones,
             tollZone.encrypted_centroids.push_back({enc_centroid_lat, enc_centroid_lon});
         }
     }
+}
+
+// SIMD-optimized geofence checking - process multiple toll zones in parallel
+vector<GeofenceResult> checkLocationInGeofencesSIMD(double gps_lat, double gps_lon,
+                                                    const SIMDTollBatch& batch,
+                                                    const vector<TollZone>& tollZones,
+                                                    Evaluator& evaluator, Encryptor& encryptor, 
+                                                    Decryptor& decryptor, CKKSEncoder& encoder,
+                                                    double scale) {
+    // Suppress unused parameter warning
+    (void)tollZones;
+    
+    vector<GeofenceResult> results;
+    
+    // Encrypt GPS coordinates as SIMD vector (replicated across all slots)
+    vector<double> gps_lat_vec(8, gps_lat);   // 8 slots for SIMD
+    vector<double> gps_lon_vec(8, gps_lon);
+    
+    Plaintext plain_gps_lat, plain_gps_lon;
+    encoder.encode(gps_lat_vec, scale, plain_gps_lat);
+    encoder.encode(gps_lon_vec, scale, plain_gps_lon);
+    
+    Ciphertext enc_gps_lat, enc_gps_lon;
+    encryptor.encrypt(plain_gps_lat, enc_gps_lat);
+    encryptor.encrypt(plain_gps_lon, enc_gps_lon);
+    
+    // SIMD homomorphic distance calculation for all toll zones in parallel
+    Ciphertext lat_diff_batch, lon_diff_batch;
+    evaluator.sub(enc_gps_lat, batch.packed_lat_centroids, lat_diff_batch);
+    evaluator.sub(enc_gps_lon, batch.packed_lon_centroids, lon_diff_batch);
+    
+    Ciphertext lat_diff_sq_batch, lon_diff_sq_batch;
+    evaluator.square(lat_diff_batch, lat_diff_sq_batch);
+    evaluator.square(lon_diff_batch, lon_diff_sq_batch);
+    
+    evaluator.rescale_to_next_inplace(lat_diff_sq_batch);
+    evaluator.rescale_to_next_inplace(lon_diff_sq_batch);
+    
+    // Align scales and parameter levels
+    parms_id_type last_parms_id = lat_diff_sq_batch.parms_id();
+    evaluator.mod_switch_to_inplace(lon_diff_sq_batch, last_parms_id);
+    lon_diff_sq_batch.scale() = lat_diff_sq_batch.scale();
+    
+    Ciphertext distance_sq_batch;
+    evaluator.add(lat_diff_sq_batch, lon_diff_sq_batch, distance_sq_batch);
+    
+    // Threshold comparison with SIMD vector
+    double primary_threshold = 0.00000036;  // ~60 meters
+    vector<double> threshold_vec(8, primary_threshold);
+    
+    Plaintext threshold_plain;
+    encoder.encode(threshold_vec, distance_sq_batch.scale(), threshold_plain);
+    Ciphertext threshold_batch;
+    encryptor.encrypt(threshold_plain, threshold_batch);
+    
+    evaluator.mod_switch_to_inplace(threshold_batch, distance_sq_batch.parms_id());
+    threshold_batch.scale() = distance_sq_batch.scale();
+    
+    Ciphertext comparison_batch;
+    evaluator.sub(threshold_batch, distance_sq_batch, comparison_batch);
+    
+    // Decrypt and decode SIMD results
+    Plaintext comparison_plain;
+    decryptor.decrypt(comparison_batch, comparison_plain);
+    vector<double> comparison_results;
+    encoder.decode(comparison_plain, comparison_results);
+    
+    // Process results for each toll zone in the batch
+    for (size_t i = 0; i < batch.batch_size; i++) {
+        GeofenceResult result;
+        result.isInside = comparison_results[i] > 1e-8;  // Apply tolerance
+        result.tollCode = batch.toll_codes[i];
+        result.geofenceIndex = 0;  // First geofence for simplicity
+        
+        if (result.isInside) {
+            result.message = "Inside geofence (SIMD batch processing)";
+        } else {
+            result.message = "Outside geofence (SIMD batch processing)";
+        }
+        
+        results.push_back(result);
+    }
+    
+    return results;
 }
 
 GeofenceResult checkLocationInGeofences(double gps_lat, double gps_lon,
@@ -752,17 +915,51 @@ int main() {
             auto filter_end = chrono::high_resolution_clock::now();
             auto filter_duration = chrono::duration_cast<chrono::milliseconds>(filter_end - filter_start);
             
-            // Check relevant toll zones (no bounding box filtering)
+            // Check relevant toll zones with SIMD optimization
             auto precision_start = chrono::high_resolution_clock::now();
             vector<GeofenceResult> results;
             
-            for (int toll_idx : relevant_toll_indices) {
-                GeofenceResult result = checkLocationInGeofences(
-                    location.lat, location.lon, tollZones[toll_idx],
-                    ckks_evaluator, ckks_encryptor, ckks_decryptor, ckks_encoder, scale
-                );
-                result.message = tollZones[toll_idx].name + " (" + tollZones[toll_idx].code + ")";
-                results.push_back(result);
+            // Get SIMD batches for the relevant latitude band
+            int target_band = -1;
+            for (size_t b = 0; b < spatial_index.band_to_zones.size(); b++) {
+                for (int zone_idx : spatial_index.band_to_zones[b]) {
+                    if (find(relevant_toll_indices.begin(), relevant_toll_indices.end(), zone_idx) != relevant_toll_indices.end()) {
+                        target_band = b;
+                        break;
+                    }
+                }
+                if (target_band != -1) break;
+            }
+            
+            if (target_band != -1 && target_band < static_cast<int>(spatial_index.simd_batches.size())) {
+                // Use SIMD-optimized processing
+                for (const auto& batch : spatial_index.simd_batches[target_band]) {
+                    auto batch_results = checkLocationInGeofencesSIMD(
+                        location.lat, location.lon, batch, tollZones,
+                        ckks_evaluator, ckks_encryptor, ckks_decryptor, ckks_encoder, scale
+                    );
+                    
+                    // Filter results to only include toll zones in relevant_toll_indices
+                    for (const auto& result : batch_results) {
+                        for (size_t i = 0; i < batch.toll_indices.size(); i++) {
+                            if (find(relevant_toll_indices.begin(), relevant_toll_indices.end(), 
+                                    batch.toll_indices[i]) != relevant_toll_indices.end()) {
+                                results.push_back(result);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Fallback to sequential processing if no SIMD batches available
+                for (int toll_idx : relevant_toll_indices) {
+                    GeofenceResult result = checkLocationInGeofences(
+                        location.lat, location.lon, tollZones[toll_idx],
+                        ckks_evaluator, ckks_encryptor, ckks_decryptor, ckks_encoder, scale
+                    );
+                    result.message = tollZones[toll_idx].name + " (" + tollZones[toll_idx].code + ")";
+                    results.push_back(result);
+                }
             }
             auto precision_end = chrono::high_resolution_clock::now();
             auto precision_duration = chrono::duration_cast<chrono::milliseconds>(precision_end - precision_start);
