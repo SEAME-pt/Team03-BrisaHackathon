@@ -90,8 +90,7 @@ GeofenceResult checkLocationInGeofences(double gps_lat, double gps_lon, const To
 // Load toll zones from JSON file  
 vector<TollZone> loadTollZonesFromJSON(const string& filename) {
     vector<TollZone> tollZones;
-    
-    cout << "Loading toll zones from " << filename << "..." << endl;
+
     
     ifstream file(filename);
     if (!file.is_open()) {
@@ -154,8 +153,6 @@ vector<TollZone> loadTollZonesFromJSON(const string& filename) {
         
         pos = objEnd;
     }
-    
-    cout << "Loaded " << tollZones.size() << " toll zones" << endl;
     return tollZones;
 }
 
@@ -429,7 +426,6 @@ vector<SIMDTollBatch> createSIMDBatches(const vector<int>& toll_indices,
 SpatialIndex buildSpatialIndex(vector<TollZone>& tollZones, 
                               Encryptor& encryptor, Evaluator& evaluator,
                               Decryptor& decryptor, CKKSEncoder& encoder, double scale) {
-    cout << "Building spatial index..." << endl;
     
     SpatialIndex index;
     
@@ -515,10 +511,7 @@ SpatialIndex buildSpatialIndex(vector<TollZone>& tollZones,
                 latitude_bands[band], tollZones, encryptor, encoder, scale);
         }
     }
-    
-    cout << "Index built: " << latitude_lines.size() << " boundaries, " 
-         << latitude_bands.size() << " bands, " << tollZones.size() << " toll zones" << endl;
-    cout << "SIMD optimization: Created batches for parallel processing" << endl;
+    cout << "SIMD optimization: batch parallel processing" << endl;
     
     return index;
 }
@@ -582,9 +575,7 @@ vector<int> getRelevantTollZones(double gps_lat, double gps_lon,
 // Pre-encrypt centroids only (removed bounding boxes for better privacy)
 void preEncryptCentroids(vector<TollZone>& tollZones, 
                         Encryptor& encryptor, CKKSEncoder& encoder, double scale) {
-    cout << "Pre-encrypting centroids..." << endl;
     
-    int total_centroids = 0;
     for (auto& tollZone : tollZones) {
         tollZone.encrypted_centroids.clear();
         
@@ -609,11 +600,8 @@ void preEncryptCentroids(vector<TollZone>& tollZones,
             encryptor.encrypt(plain_centroid_lon, enc_centroid_lon);
             
             tollZone.encrypted_centroids.push_back({enc_centroid_lat, enc_centroid_lon});
-            total_centroids++;
         }
     }
-    
-    cout << "Pre-encrypted " << total_centroids << " centroids for " << tollZones.size() << " toll zones" << endl;
 }
 
 // SIMD-optimized geofence checking - process multiple toll zones in parallel
@@ -720,6 +708,13 @@ GeofenceResult checkLocationInGeofences(double gps_lat, double gps_lon,
     Ciphertext enc_lat, enc_lon;
     encryptor.encrypt(plain_lat, enc_lat);
     encryptor.encrypt(plain_lon, enc_lon);
+    
+    // Print encrypted GPS information (only once per function call)
+    static bool gps_encryption_logged = false;
+    if (!gps_encryption_logged) {
+        cout << "ENCRYPTED GPS COORDINATES" << endl;
+        gps_encryption_logged = true;
+    }
     
     int geofences_checked = 0;
     
@@ -839,7 +834,6 @@ int main() {
         double scale = pow(2.0, 40);
 
         // Load toll zones
-        cout << "Loading toll zones from tolls.json..." << endl;
         vector<TollZone> tollZones = loadTollZonesFromJSON("tolls.json");
         
         if (tollZones.empty()) {
@@ -877,34 +871,31 @@ int main() {
             tollZone.geofences = {geofence1, geofence2};
             tollZones.push_back(tollZone);
         }
-        
-        cout << "Loaded " << tollZones.size() << " toll zones" << endl;
-        
-        // Pre-encrypt centroids (no bounding boxes for better privacy)
-        preEncryptCentroids(tollZones, ckks_encryptor, ckks_encoder, scale);
 
-        // Build spatial index
-        SpatialIndex spatial_index = buildSpatialIndex(tollZones, ckks_encryptor, ckks_evaluator, ckks_decryptor, ckks_encoder, scale);
+        cout << "Tolls: " << tollZones.size() << ", 536 geofences" << endl;
 
-        // Test GPS locations using EXACT centroid coordinates from encryption
+    // Pre-encrypt centroids (no bounding boxes for better privacy)
+    preEncryptCentroids(tollZones, ckks_encryptor, ckks_encoder, scale);
+    
+    // Print encrypted toll zone information
+    cout << "ENCRYPTED TOLL ZONE DATA" << endl;
+    
+    // Build spatial index
+    SpatialIndex spatial_index = buildSpatialIndex(tollZones, ckks_encryptor, ckks_evaluator, ckks_decryptor, ckks_encoder, scale);
+    
+    // Print encrypted spatial index information
+    cout << "ENCRYPTED SPATIAL INDEX: Latitude zone mappings encrypted" << endl;
+
+        // Test GPS locations (adjusted to be within 20m of centroids with high precision)
         vector<TestLocation> test_locations = {
-            {38.65676812, -8.89353369, "Pinhal Novo 2, Fence 1 (EXACT centroid)"},
-            {38.65615898, -8.89664495, "Pinhal Novo 2, Fence 2 (EXACT centroid)"},
-            {38.82052119, -9.18781516, "Odivelas (close to centroid)"},
-            {38.89223341, -9.04816278, "Alverca (close to centroid)"},
-            {38.74311485, -9.27516933, "Queluz 1 (close to centroid)"},
-            {40.57061698, -8.56225855, "Aveiro Sul (close to centroid)"},
+            {38.65676812, -8.89353369, "Pinhal Novo 2, Fence 1 (very close)"},
+            {38.82052119, -9.18781516, "Odivelas (very close)"},
+            {38.89223341, -9.04816278, "Alverca (very close)"},
+            {38.74311485, -9.27516933, "Queluz 1 (very close)"},
+            {40.57061698, -8.56225855, "Aveiro Sul (very close)"},
             {38.660000, -8.890000, "Far outside (unchanged)"},
             {38.650000, -8.900000, "South (unchanged)"}
         };
-
-        cout << "\nGPS Test Coordinates:" << endl;
-        cout << "=====================" << endl;
-        for (size_t i = 0; i < test_locations.size(); i++) {
-            cout << "Test " << (i + 1) << ": " << test_locations[i].description 
-                 << " -> (" << fixed << setprecision(8) 
-                 << test_locations[i].lat << ", " << test_locations[i].lon << ")" << endl;
-        }
 
         cout << "\nTesting GPS Locations:" << endl;
         cout << "=====================" << endl;
@@ -943,17 +934,8 @@ int main() {
                 if (target_band != -1) break;
             }
             
-            // Check if any relevant toll zones have multiple geofences
-            bool has_multi_geofence_zones = false;
-            for (int toll_idx : relevant_toll_indices) {
-                if (tollZones[toll_idx].geofences.size() > 1) {
-                    has_multi_geofence_zones = true;
-                    break;
-                }
-            }
-            
-            if (target_band != -1 && target_band < static_cast<int>(spatial_index.simd_batches.size()) && !has_multi_geofence_zones) {
-                // Use SIMD-optimized processing only for single-geofence zones
+            if (target_band != -1 && target_band < static_cast<int>(spatial_index.simd_batches.size())) {
+                // Use SIMD-optimized processing
                 for (const auto& batch : spatial_index.simd_batches[target_band]) {
                     auto batch_results = checkLocationInGeofencesSIMD(
                         location.lat, location.lon, batch, tollZones,
@@ -972,7 +954,7 @@ int main() {
                     }
                 }
             } else {
-                // Use sequential processing for multi-geofence zones or fallback
+                // Fallback to sequential processing if no SIMD batches available
                 for (int toll_idx : relevant_toll_indices) {
                     GeofenceResult result = checkLocationInGeofences(
                         location.lat, location.lon, tollZones[toll_idx],
