@@ -36,6 +36,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.*
 
 data class LocationPoint(
     val latitude: Double,
@@ -43,6 +44,12 @@ data class LocationPoint(
     val timestamp: Long,
     val altitude: Double = 0.0,
     val inHighway: String = "YES"
+)
+
+data class TollCache(
+    val toll: Toll,
+    val distanceToCenter: Double,
+    val lastChecked: Long = System.currentTimeMillis()
 )
 
 class LocationReceiverService : Service(), TextToSpeech.OnInitListener {
@@ -63,6 +70,13 @@ class LocationReceiverService : Service(), TextToSpeech.OnInitListener {
     private var closedTollBuffer: Toll? = null
     private var openedTollLocationBuffer: LocationPoint? = null
 
+    //Cache infos
+    private val tollCache = mutableListOf<Toll>()
+    private val cacheRadiusKm = 50.0
+    private val cacheUpdateIntervalMs = 5 * 60 * 1000L // 5 minutes
+    private var lastCacheUpdate = 0L
+    private var lastKnownLocation: LocationPoint? = null
+
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob) // Background thread
 
@@ -72,22 +86,37 @@ class LocationReceiverService : Service(), TextToSpeech.OnInitListener {
     }
 
     private val locationCallback = object : ILocationReceiverCallback.Stub() {
-        override fun onNewLocationData(
-            latitude: Double,
-            longitude: Double,
-            timestamp: Long,
-            accuracy: Float
-        ) {
-            Log.i(tag, "onNewLocationData: Lat=$latitude, Lon=$longitude, Time=$timestamp, Acc=$accuracy (from PID: ${Binder.getCallingPid()}, my PID: ${Process.myPid()})")
-            for (toll in tollList) {
-                for (geofence in toll.geofences) {
-                    if (isPointInPolygon(latitude, longitude, geofence.geofencePoints )) {
-                        Log.d(tag, "point in ${toll.name} of type ${toll.type}!")
-                        val currentPoint = LocationPoint(latitude, longitude, timestamp, accuracy.toDouble())
-                        handleTollEvent(toll, currentPoint)
-                    }
+        override fun onNewLocationData(latitude: Double, longitude: Double, timestamp: Long, accuracy: Float) {
+            Log.i(tag, "onNewLocationData: Lat=$latitude, Lon=$longitude, Time=$timestamp, Acc=$accuracy")
+            serviceScope.launch {
+                try {
+                    processLocationUpdate(latitude, longitude, timestamp, accuracy)
+                } catch (e: Exception) {
+                    Log.e(tag, "Error processing location update: ${e.message}", e)
                 }
+            }
+        }
+    }
 
+    private suspend fun processLocationUpdate(latitude: Double, longitude: Double, timestamp: Long, accuracy: Float) {
+        val currentLocation = LocationPoint(latitude, longitude, timestamp)
+        lastKnownLocation = currentLocation
+        val now = System.currentTimeMillis()
+
+        if (now - lastCacheUpdate > cacheUpdateIntervalMs || tollCache.isEmpty()) {
+            Log.d(tag, "Refreshing toll cache...")
+            updateTollCache(currentLocation)
+            Log.d(tag, "Cache contains ${tollCache.size} entries")
+
+        }
+
+        for (toll in tollCache) {
+            for (geofence in toll.geofences) {
+                if (isPointInPolygon(currentLocation.latitude, currentLocation.longitude, geofence.geofencePoints)) {
+                    Log.d(tag, "Inside toll: ${toll.name}, type=${toll.type}")
+                    handleTollEvent(toll, currentLocation)
+                    return
+                }
             }
         }
     }
@@ -138,6 +167,30 @@ class LocationReceiverService : Service(), TextToSpeech.OnInitListener {
                 }
             }
         }
+    }
+
+    // Cache utilities
+    private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val earthRadius = 6371.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = sin(dLat / 2).pow(2) + cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2)
+        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        return earthRadius * c
+    }
+
+    private fun calculateDistanceToTollCenter(location: LocationPoint, toll: Toll): Double {
+        return calculateDistance(location.latitude, location.longitude, toll.latitude, toll.longitude)
+    }
+
+    private suspend fun updateTollCache(currentLocation: LocationPoint) {
+        tollCache.clear()
+        val nearbyTolls = tollList.filter {
+            calculateDistanceToTollCenter(currentLocation, it) <= cacheRadiusKm
+        }
+        tollCache.addAll(nearbyTolls)
+        lastCacheUpdate = System.currentTimeMillis()
+        Log.d(tag, "Updated toll cache with ${tollCache.size} nearby tolls")
     }
 
     private val connection = object : ServiceConnection {
