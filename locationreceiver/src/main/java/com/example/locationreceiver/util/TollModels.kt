@@ -16,6 +16,12 @@ data class Geofence(
     val geofencePoints: List<GeofencePoint>
 )
 
+// Is this going to work when desiarilized
+enum class TollState {
+    OPEN,
+    CLOSED
+}
+
 @Serializable
 data class Toll(
     val code: String,

@@ -14,17 +14,17 @@ import kotlinx.coroutines.*
 import org.json.JSONObject
 import com.example.locationreceiver.util.SecureStorage
 import com.example.locationreceiver.util.TollsResponse
+import com.example.locationreceiver.util.TollState
 import android.content.ComponentName
 import android.content.Context
 import android.content.ServiceConnection
-import android.os.Binder
-import android.os.Process
 import android.os.RemoteException
 import com.example.common_aidl_interfaces.ILocationProvider
 import com.example.common_aidl_interfaces.ILocationReceiverCallback
 import com.example.locationreceiver.util.GeofencePoint
 import com.example.locationreceiver.util.Toll
 import kotlinx.serialization.json.Json
+import kotlin.math.*
 
 data class LocationPoint(
     val latitude: Double,
@@ -34,6 +34,12 @@ data class LocationPoint(
     val inHighway: String = "YES"
 )
 
+data class TollCache(
+    val toll: Toll,
+    val distanceToCenter: Double,
+    val lastChecked: Long = System.currentTimeMillis()
+)
+
 class LocationReceiverService : Service() {
 
     private val tag = "LocationReceiverService"
@@ -41,9 +47,17 @@ class LocationReceiverService : Service() {
     private var isBound = false
 
     private val tollList = mutableListOf<Toll>()
+	private val tollCache = mutableListOf<Toll>() // near tolls are stored to reduce computation
+    private var lastClosedToll: Toll? = null
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob) // Background thread
+
+    // Cache config
+    private val cacheRadiusKm = 50.0
+    private val cacheUpdateIntervalMs = 5 * 60 * 1000L // 5 minutes
+    private var lastCacheUpdate = 0L
+    private var lastKnownLocation: LocationPoint? = null
 
     private val httpClient by lazy {
         HttpClient(CIO) {
@@ -57,18 +71,154 @@ class LocationReceiverService : Service() {
             timestamp: Long,
             accuracy: Float
         ) {
-            Log.i(tag, "onNewLocationData: Lat=$latitude, Lon=$longitude, Time=$timestamp, Acc=$accuracy (from PID: ${Binder.getCallingPid()}, my PID: ${Process.myPid()})")
-            for (toll in tollList) {
-                for (geofence in toll.geofences) {
-                    if (isPointInPolygon(latitude, longitude, geofence.geofencePoints )) {
-                        Log.d(tag, "point in ${toll.name}!")
-                        //Raise a flag if the toll is CLOSED
-                        //Break (cant be anywhgere else)
-                    }
+            Log.i(tag, "onNewLocationData: Lat=$latitude, Lon=$longitude, Time=$timestamp, Acc=$accuracy")
+
+            // Launch coroutine to avoid blocking the callback
+            serviceScope.launch {
+                try {
+                    processLocationUpdate(latitude, longitude, timestamp, accuracy)
+                } catch (e: Exception) {
+                    Log.e(tag, "Error processing location update: ${e.message}", e)
                 }
             }
-            // perform more logic if we entered a CLOSED zone
-            // maybe a coroutine OR thread should be spawn to avoid blocking in the callback
+        }
+    }
+
+    private suspend fun processLocationUpdate(
+        latitude: Double,
+        longitude: Double,
+        timestamp: Long,
+        accuracy: Float
+    ) {
+        val currentLocation = LocationPoint(latitude, longitude, timestamp)
+        lastKnownLocation = currentLocation
+        val now = System.currentTimeMillis()
+
+        if (now - lastCacheUpdate > cacheUpdateIntervalMs || tollCache.isEmpty()) {
+            Log.d(tag, "Updating toll cache...")
+            updateTollCache(currentLocation)
+            Log.d(tag, "Cache contains ${tollCache.size} entries")
+            lastCacheUpdate = now
+        }
+
+        checkTollZones(currentLocation)
+    }
+
+    private suspend fun updateTollCache(currentLocation: LocationPoint) {
+        tollCache.clear()
+
+        val nearbyTolls = tollList.filter { toll ->
+            val distance = calculateDistanceToTollCenter(currentLocation, toll)
+            distance <= cacheRadiusKm
+        }
+
+        tollCache.addAll(nearbyTolls)
+
+        Log.d(tag, "Updated toll cache with ${tollCache.size} nearby tolls")
+    }
+
+
+    private fun calculateDistanceToTollCenter(location: LocationPoint, toll: Toll): Double {
+        return calculateDistance(location.latitude, location.longitude, toll.latitude, toll.longitude)
+    }
+
+    // harvesine distance
+    private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val earthRadius = 6371.0 // earth radius in km
+
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+
+        val a = sin(dLat / 2).pow(2) + cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2)
+        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+
+        return earthRadius * c
+    }
+
+    // checks if the current location is within a toll zone
+    private suspend fun checkTollZones(currentLocation: LocationPoint) {
+        var enteredToll: Toll? = null
+
+        // Check cached tolls for entry
+        for (toll in tollCache) {
+            for (geofence in toll.geofences) {
+                if (isPointInPolygon(currentLocation.latitude, currentLocation.longitude, geofence.geofencePoints)) {
+                    Log.d(tag, "Entered toll zone: ${toll.name}")
+                    enteredToll = toll
+                    break // can't be in multiple toll
+                }
+            }
+        }
+
+        // check if we exited the current closed toll zone
+        lastClosedToll?.let { closedToll ->
+            var stillInside = false
+            for (geofence in closedToll.geofences) {
+                if (isPointInPolygon(currentLocation.latitude, currentLocation.longitude, geofence.geofencePoints)) {
+                    stillInside = true
+                    break
+                }
+            }
+
+            // if we went out we can clear the last closed toll and send the api the infos
+            if (!stillInside) {
+                Log.d(tag, "Exited closed toll zone: ${closedToll.name}")
+                handleClosedTollExit(closedToll, currentLocation)
+                lastClosedToll = null
+            }
+        }
+
+        if (enteredToll != null) {
+            handleTollEntry(enteredToll, currentLocation)
+        }
+    }
+
+    private suspend fun handleTollEntry(toll: Toll, location: LocationPoint) {
+        val tollState = determineTollState(toll)
+
+        when (tollState) {
+            TollState.OPEN -> {
+                Log.i(tag, "Processing OPEN toll: ${toll.name}")
+                handleOpenToll(toll, location)
+            }
+            TollState.CLOSED -> {
+                // Check if we're already in this specific closed toll
+                if (lastClosedToll?.code != toll.code) {
+                    // If we're in a different closed toll, exit it first
+                    lastClosedToll?.let { previousToll ->
+                        Log.i(tag, "Exiting previous closed toll: ${previousToll.name}")
+                        handleClosedTollExit(previousToll, location)
+                    }
+
+                    // Enter the new closed toll
+                    Log.i(tag, "Entering CLOSED toll zone: ${toll.name}")
+                    lastClosedToll = toll
+                    handleClosedTollEntry(toll, location)
+                } else {
+                    // We're already in this closed toll, do nothing (avoid duplicate entries)
+                    Log.d(tag, "Already in closed toll zone: ${toll.name}")
+                }
+            }
+        }
+    }
+
+    private suspend fun handleClosedTollEntry(toll: Toll, location: LocationPoint) {}
+    private suspend fun handleClosedTollExit(toll: Toll, location: LocationPoint) {}
+
+
+    private suspend fun handleOpenToll(toll: Toll, location: LocationPoint) {
+        Log.i(tag, "Processing payment for OPEN toll: ${toll.name}")
+
+        // Send post
+
+        // Avoid duplicate notification
+    }
+
+    private fun determineTollState(toll: Toll): TollState {
+        return when (toll.type.uppercase()) {
+            "OPEN" -> TollState.OPEN
+            "CLOSED" -> TollState.CLOSED
+            else -> TollState.OPEN // Default fallback
         }
     }
 
