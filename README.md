@@ -126,7 +126,7 @@ The application requires the following permissions (automatically requested):
 - **Token Management**: Automatic token refresh and secure cleanup
 - **Network Security**: HTTPS-only communication with Brisa API
 
-## 🛠️ Development
+## Development
 
 ### Key Technologies
 - **Kotlin**: Primary programming language
