@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 rootProject.name = "BRISA"
 include(":locationprovider")
 include(":locationreceiver")
+include(":automotive")
