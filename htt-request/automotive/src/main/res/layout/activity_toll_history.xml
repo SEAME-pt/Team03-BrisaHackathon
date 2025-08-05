@@ -1,0 +1,97 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+
+    android:id="@+id/layout_toll_history"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#000000"
+    android:padding="16dp">
+
+    <!-- Title -->
+
+    <!-- Filters row -->
+    <TextView
+        android:id="@+id/tv_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingBottom="16dp"
+        android:paddingTop="20dp"
+        android:layout_marginBottom="16dp"
+        android:text="Histórico Via Verde"
+        android:textColor="@android:color/white"
+        android:textSize="28sp"
+        android:textStyle="bold" />
+
+    <!--    <LinearLayout-->
+<!--        android:layout_width="match_parent"-->
+<!--        android:layout_height="wrap_content"-->
+<!--        android:paddingHorizontal="16dp"-->
+<!--        android:gravity="center_horizontal">-->
+
+<!--        <Spinner-->
+<!--            android:id="@+id/spinner_history_type"-->
+<!--            android:layout_width="wrap_content"-->
+<!--            android:layout_height="wrap_content"-->
+<!--            android:background="@drawable/spinner_background"-->
+<!--            android:spinnerMode="dropdown" />-->
+<!--    </LinearLayout>-->
+
+
+    <LinearLayout
+        android:id="@+id/filter_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginBottom="24dp"
+        android:layout_marginTop="8dp">
+
+        <Button
+            android:id="@+id/btn_filter_last7days"
+            style="@style/Button1"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:backgroundTint="#FFFFFF"
+            android:textColor="#00703C"
+            android:text="Últimos 7 dias"
+            android:textSize="22sp"
+            android:onClick="onClick" />
+
+        <Button
+            android:id="@+id/btn_filter_month"
+            style="@style/Button1"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginStart="17dp"
+            android:backgroundTint="#FFFFFF"
+            android:textColor="#00703C"
+            android:text="Este mês"
+            android:textSize="22sp"
+            android:onClick="onClick" />
+
+        <Button
+            android:id="@+id/btn_filter_all"
+            style="@style/Button1"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginStart="17dp"
+            android:background="@drawable/button_border"
+            android:textColor="#FFFFFF"
+            android:text="Todos"
+            android:textSize="22sp"
+            android:onClick="onClick" />
+
+    </LinearLayout>
+
+    <!-- RecyclerView -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_toll_history"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="16dp" />
+
+</LinearLayout>

@@ -39,13 +39,15 @@ class LoginActivity : AppCompatActivity() {
 
             lifecycleScope.launch {
                 val isSuccess= LoginHelper.loginAndSaveToken(this@LoginActivity, emailInput, passwordInput)
+//                val isSuccess= LoginHelper.loginAndSaveToken(this@LoginActivity, "seame3@teste.com", "}jcUX]BBp*73")
+
                 if (isSuccess) {
                     Toast.makeText(
                         this@LoginActivity,
                         "Login realizado com sucesso!",
                         Toast.LENGTH_SHORT
                     ).show()
-                    val intent = Intent(this@LoginActivity, HomeActivity::class.java)
+                    val intent = Intent(this@LoginActivity, TollHistoryActivity::class.java)
                     startActivity(intent)
                     finish()
                 } else {

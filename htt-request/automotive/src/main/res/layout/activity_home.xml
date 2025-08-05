@@ -14,23 +14,35 @@
             android:id="@+id/tv_welcome"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Bem-vindo ao Via Verde"
-            android:textSize="22sp"
+            android:text="Bem-vindo ao Via Verde!"
+            android:textSize="24sp"
             android:textStyle="bold"
             android:layout_marginBottom="32dp"/>
 
         <Button
             android:id="@+id/btn_saldo_recargas"
-            android:layout_width="match_parent"
+            style="@style/Button1"
+            android:layout_width="342dp"
             android:layout_height="wrap_content"
-            android:text="Saldo e Recargas"
-            android:layout_marginBottom="16dp"/>
+            android:layout_gravity="center"
+            android:layout_marginTop="16dp"
+            android:textSize="20sp"
+            android:textStyle="normal"
+            android:backgroundTint="#009944"
+            android:text="Saldo e Recargas" />
+
 
         <Button
             android:id="@+id/btn_historico_portagens"
-            android:layout_width="match_parent"
+            style="@style/Button1"
+            android:layout_width="342dp"
             android:layout_height="wrap_content"
-            android:text="Histórico de Portagens"/>
+            android:layout_gravity="center"
+            android:layout_marginTop="16dp"
+            android:textSize="20sp"
+            android:backgroundTint="#009944"
+            android:text="Histórico de Portagens" />
+
     </LinearLayout>
 
 

@@ -1,12 +1,12 @@
 <resources>
     <string name="app_name">BrisaTest</string>
-    <string name="hint_username">Username</string>
-    <string name="hint_password">Password</string>
-    <string name="button_sign_in">Sign in</string>
+    <string name="hint_username">Nome de utilizador</string>
+    <string name="hint_password">Senha</string>
+    <string name="button_sign_in">Iniciar sessão</string>
     <string name="button_sign_up">Sign up</string>
     <string name="button_send">Send</string>
     <string name="text_forgot_password">Forgot password?</string>
-    <string name="text_signin_message">Hello, sign in to your account</string>
+    <string name="text_signin_message">Olá, inicie sessão na sua conta</string>
     <string name="text_signin_social_media">Or Sign in using social media</string>
     <string name="text_signup_social_media">Or Sign up using social media</string>
     <string name="text_signin_signup">Don\'t have an account? <b>Sign up</b></string>

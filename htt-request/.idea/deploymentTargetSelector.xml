@@ -4,6 +4,14 @@
     <selectionStates>
       <SelectionState runConfigName="automotive">
         <option name="selectionMode" value="DROPDOWN" />
+        <DropdownSelection timestamp="2025-07-31T15:02:13.004895097Z">
+          <Target type="DEFAULT_BOOT">
+            <handle>
+              <DeviceId pluginId="LocalEmulator" identifier="path=/home/lpicoli-/.android/avd/Automotive_1408p_landscape.avd" />
+            </handle>
+          </Target>
+        </DropdownSelection>
+        <DialogSelection />
       </SelectionState>
     </selectionStates>
   </component>
